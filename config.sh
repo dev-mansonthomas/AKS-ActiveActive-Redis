@@ -1,9 +1,8 @@
-RESOURCE_GROUP=anton-rg-aa-aks
-CLUSTER1=redis-eastus
-#CLUSTER1=redis-canadaeast
-CLUSTER2=redis-canadacentral
-DNS_ZONE=demo.umnikov.com
-#DNS_ZONE=sademo.umnikov.com
+RESOURCE_GROUP=ThomasManson-temp-AKS
+CLUSTER1=redis-francecentral
+CLUSTER2=redis-ukwest
+CLUSTER3=
+DNS_ZONE=demo.paquerette.com
 # Resource Group zone where DNS is defined
-DNS_RESOURCE_GROUP=anton-rg
+DNS_RESOURCE_GROUP=ThomasManson
 NS=rec

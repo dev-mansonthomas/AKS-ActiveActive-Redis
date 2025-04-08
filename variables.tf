@@ -1,23 +1,29 @@
 variable "region1" {
   type        = string
-  default     = "eastus"
+  default     = "francecentral"
   description = "Region 1 of the AA deployment"
 }
 
 variable "region2" {
   type        = string
-  default     = "canadacentral"
+  default     = "ukwest"
   description = "Region 2 of the AA deployment"
 }
 
 variable "instance_type" {
   type        = string
-  default     = "Standard_D8_v5"
+  default     = "Standard_D8s_v3"
   description = "Instance type for the AKS cluster"
 }
 
 variable "azure_rg" {
   type        = string
-  default     = "anton-rg-aa-aks"
+  default     = "ThomasManson-temp-AKS"
   description = "Resource group to provision the infrastructure"
+}
+
+variable "subscription_id" {
+  type        = string
+  #default     = "ef03f41d-d2bd-4691-b3a0-3aff1c6711f7"
+  description = "Azure subscription ID"
 }

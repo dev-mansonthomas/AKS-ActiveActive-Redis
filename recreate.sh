@@ -1,2 +1,4 @@
-terraform destroy -auto-approve
-terraform apply -auto-approve
+#!/bin/bash
+
+./delete-all-resources.sh
+./create-all.sh

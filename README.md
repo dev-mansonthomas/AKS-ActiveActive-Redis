@@ -68,7 +68,8 @@ You need to have the followin software installed:
 ### 1. Provision AKS clusters
 
 ```
-terraform apply
+tofu init
+tofu apply -auto-approve
 ```
 Process typically takes 3-5 minutes.
 
@@ -101,7 +102,7 @@ You can inspect the generated resources under the `./yaml` folder. The same scri
 ### 4. Create Redis Active Active Database
 
 ```
-kubectl apply -n rec -f yaml/crdb.yaml
+./create-active-active-db.sh
 ```
 
 Assuming previos steps went well you should be able to successfully create the Active Active Database

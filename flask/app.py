@@ -10,11 +10,9 @@ import json
 app = Flask(__name__)
 
 
-region1="canadacentral"
-region2="eastus"
-#region2="canadaeast"
-dns_suffix="demo.umnikov.com"
-#dns_suffix="sademo.umnikov.com"
+region1="francecentral"
+region2="ukwest"
+dns_suffix="demo.paquerette.com"
 
 def connect_to_redis(region):
     print(f"crdb-anton-db.redis-{region}.{dns_suffix}")
