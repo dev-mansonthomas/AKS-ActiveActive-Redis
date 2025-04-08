@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Logs
+logs/*
+!logs/.gitkeep
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.backup
+
+# PyCharm / IDE
+.idea/
+
+#project specific
+
+#Générated yaml
+yaml/*
