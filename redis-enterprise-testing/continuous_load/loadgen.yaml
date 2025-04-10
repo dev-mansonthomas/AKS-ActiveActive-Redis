@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-loadgen
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis-loadgen
+  template:
+    metadata:
+      labels:
+        app: redis-loadgen
+    spec:
+      containers:
+        - name: redis-loadgen
+          image: thomasmanson458/redis-loadgen:latest
+          env:
+            - name: REDIS_HOST
+              value: "demo-scalable-db.rec.svc.cluster.local"
+            - name: REDIS_PORT
+              value: "10001"
+          resources:
+            limits:
+              memory: "64Mi"
+              cpu: "100m"

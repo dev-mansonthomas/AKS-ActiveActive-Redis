@@ -1,0 +1,6 @@
+redis
+python-dotenv
+Flask
+kubernetes
+requests
+urllib3

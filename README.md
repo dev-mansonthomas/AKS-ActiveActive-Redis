@@ -107,6 +107,38 @@ You can inspect the generated resources under the `./yaml` folder. The same scri
 
 Assuming previos steps went well you should be able to successfully create the Active Active Database
 
+## Login to Redis Enterprise Admin UI
+
+```
+~/Projects/AKS-ActiveActive-Redis ➜ kubectl get svc -n rec
+NAME                    TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)             AGE
+admission               ClusterIP   10.0.122.17    <none>        443/TCP             6h43m
+crdb-anton              ClusterIP   10.0.235.190   <none>        12318/TCP           6h38m
+crdb-anton-headless     ClusterIP   None           <none>        12318/TCP           6h38m
+rec-redis-ukwest        ClusterIP   10.0.58.176    <none>        9443/TCP,8001/TCP   6h43m
+rec-redis-ukwest-prom   ClusterIP   None           <none>        8070/TCP            6h43m
+rec-redis-ukwest-ui     ClusterIP   10.0.111.193   <none>        8443/TCP            6h43m
+
+~/Projects/AKS-ActiveActive-Redis ➜ kubectl port-forward svc/rec-redis-ukwest-ui 8443:8443 -n rec
+Forwarding from 127.0.0.1:8443 -> 8443
+Forwarding from [::1]:8443 -> 8443
+Handling connection for 8443
+...
+``` 
+open a new terminal :
+
+```
+ kubectl get secret rec-redis-ukwest -n rec -o jsonpath="{.data.username}" | base64 --decode && echo
+demo@redis.com
+kubectl get secret rec-redis-ukwest -n rec -o jsonpath="{.data.password}" | base64 --decode && echo
+XXXXX
+```
+open 
+https://localhost:8443/#/
+
+and provide the credentials
+
+
 ## Troubleshooting
 
 ### Resources not fully provisioned
@@ -116,12 +148,12 @@ Assuming previos steps went well you should be able to successfully create the A
 ### Collecting logs
 
 ```
-bash test.sh
+./check-redis-enterprise-on-azure.sh
 ```
 
 Would collect logs and k8s resource statuses from various components of the setup in `./logs` folder.
 
-Alternatevely you can use Log Collector as described here: https://docs.redis.com/latest/kubernetes/logs/collect-logs/
+Alternatively you can use Log Collector as described here: https://docs.redis.com/latest/kubernetes/logs/collect-logs/
 
 ### Redis Cluster Status
 

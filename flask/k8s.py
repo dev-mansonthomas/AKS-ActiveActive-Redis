@@ -4,6 +4,8 @@ import base64
 from requests.auth import HTTPBasicAuth
 import requests
 import json
+import urllib3
+urllib3.disable_warnings()
 
 region="eastus"
 

@@ -6,8 +6,8 @@ cat config.sh
 
 
 echo "removing existing logs if any"
-mkdir -p ./logs
-rm ./logs/*.*
+mkdir -p ../logs
+rm ../logs/*.*
 
 for CLUSTER in $CLUSTER1 $CLUSTER2
 do
@@ -16,7 +16,7 @@ do
   echo "▶️ Context: $(kubectl config current-context)"
 
 
-  FILE="./logs/$CLUSTER-get-all.txt"
+  FILE="../logs/$CLUSTER-get-all.txt"
   echo "#################################################################"
   echo "  kubectl get all for $CLUSTER" in $FILE
   echo "#################################################################"
@@ -37,14 +37,14 @@ do
   -u "$REC_UNAME:$REC_PASSWORD" \
   | jq .name
 
-  FILE="./logs/$CLUSTER-operator.log"
+  FILE="../logs/$CLUSTER-operator.log"
   echo "#################################################################"
   echo "  REC Operator logs for $CLUSTER" in $FILE
   echo "#################################################################"
   kubectl logs deployment.apps/redis-enterprise-operator -n $NS > $FILE
   tail $FILE
 
-  FILE="./logs/$CLUSTER-ingress.txt"
+  FILE="../logs/$CLUSTER-ingress.txt"
   echo "#################################################################"
   echo "  Ingress for $CLUSTER" in $FILE
   echo "#################################################################"
@@ -53,7 +53,7 @@ do
   echo "kubectl get ingress -o yaml is in file $FILE"
   kubectl get ingress -A -o yaml >> $FILE
 
-  FILE="./logs/$CLUSTER-rec.txt"
+  FILE="../logs/$CLUSTER-rec.txt"
   echo "#################################################################"
   echo "  REC Resources for $CLUSTER" in $FILE
   echo "#################################################################"
@@ -62,7 +62,7 @@ do
   echo "kubectl get rec -o yaml is in file $FILE"
   kubectl get rec -A -o yaml >> $FILE
 
-  FILE="./logs/$CLUSTER-rerc.txt"
+  FILE="../logs/$CLUSTER-rerc.txt"
   echo "#################################################################"
   echo "  RERC for $CLUSTER" in $FILE
   echo "#################################################################"
@@ -71,7 +71,7 @@ do
   echo "kubectl get rerc -o yaml is in file $FILE"
   kubectl get rerc -A -o yaml >> $FILE
 
-  FILE="./logs/$CLUSTER-redb.txt"
+  FILE="../logs/$CLUSTER-redb.txt"
   echo "#################################################################"
   echo "  REDB for $CLUSTER" in $FILE
   echo "#################################################################"
@@ -80,7 +80,7 @@ do
   echo "kubectl get redb -o yaml is in file $FILE"
   kubectl get redb -A -o yaml >> $FILE
 
-  FILE="./logs/$CLUSTER-reaadb.txt"
+  FILE="../logs/$CLUSTER-reaadb.txt"
   echo "#################################################################"
   echo "  REAADB status for $CLUSTER" in $FILE
   echo "#################################################################"
@@ -89,7 +89,7 @@ do
   echo "kubectl describe reaadb $NS is in file $FILE"
   kubectl describe reaadb -n $NS >> $FILE
 
-  FILE="./logs/$CLUSTER-rladmin-status.txt"
+  FILE="../logs/$CLUSTER-rladmin-status.txt"
   echo "#################################################################"
   echo "  rladmin status for $CLUSTER" in $FILE
   echo "#################################################################"
