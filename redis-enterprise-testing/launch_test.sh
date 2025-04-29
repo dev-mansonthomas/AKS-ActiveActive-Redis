@@ -15,10 +15,10 @@ done
 KEY="counter"
 COUNT1=1000
 COUNT2=1000
-HOST1="crdb-anton-db.$CLUSTER1.${DNS_ZONE}"
-HOST2="crdb-anton-db.$CLUSTER2.${DNS_ZONE}"
+HOST1="${AA_DB_NAME}-db.${CLUSTER1}.${DNS_ZONE}"
+HOST2="${AA_DB_NAME}-db.${CLUSTER2}.${DNS_ZONE}"
 if [ -n "$CLUSTER3" ]; then
-  HOST3="crdb-anton-db.$CLUSTER3.${DNS_ZONE}"
+  HOST3="${AA_DB_NAME}-db.${CLUSTER3}.${DNS_ZONE}"
 fi
 PORT=443
 

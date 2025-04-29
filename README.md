@@ -1,154 +1,273 @@
-# Deploying Redis Enterprise Active Active on AKS
+# Deploying Redis Enterprise Active Active on AKS & Demo
 
 This repo contains deployment scripts and web monitoring dashboard for Active Active Redis Enterprise deployment in two Azure Regions.
+This repo will allow you to showcase the 99.999% HA capabilities of RedisEnterprise
 
 ![alt text](images/flask_app.png)
 
-## Prerequisites and Configuration
+# Prerequisites and Configuration
 
-### Azure subscription and CLI
+## Prerequisites
 
-You need t be able to successfully authenticate your azure cli to the Azure Subscription:
-```
-az login
-```
+You'll need : 
+* A temporary license for Redis Enterprise if you want to create more than 4 shards
+* A domain name (if you don't have it, try Gandi.net)
+* Azure account
+* 2 regions, with each 24 vCPU, supporting AKZ & Azure Identity Management
+  * this can be lowered to 2 vCPU per node, so 6 per region, total of 12 for the active/active setup
 
-### Azure DNS Zone
+_Software on your machine_
 
-Redis Enterprise ActiveActive requires FQDN (NOT the public IP) of the ingress services for both participating clusters. In your Azure Subscription create DNS Zone and make sure it resolvable by the public DNS. You might use subdomain of the existing domain hosted elsewhere.
-
-The following ENV variables in the `config.sh` and `flask/app.py` need to point to your DNS record and the resource group where this record lives.
-```
-DNS_ZONE=demo.umnikov.com
-DNS_RESOURCE_GROUP=anton-rg
-```
-
-### Azure regions
-
-Terraform and bash scripts use Azure region name as both cluster and region identifiers. Make sure your subscription has access and sufficient Quota to provision 3 node cluster in each of the regions. By default, nodes used for AKS cluster are Standard_D8_v5 (8 vCPUs, 32GB ram). You can change the node type in `variables.tf` file.
-
-Adjust `variables.tf` `config.sh` and `flask/app.py` files:
-
-```
-# config.sh
-CLUSTER1=redis-eastus
-CLUSTER2=redis-canadacentral
-```
-```
-//variables.tf
-variable "region2" {
-  type        = string
-  default     = "canadacentral"
-  description = "Region 2 of the AA deployment"
-}
-```
-```
-# flask/app.py
-region2="canadaeast"
-dns_suffix="demo.umnikov.com"
-```
-
-### Resource groups
-
-Terraform scripts would create a resource group to deploy AKS clusters. Default name is `anton-rg-aa-aks`You can change that name in `variables.tf` file. This group is temporary and is destroyed upon `terraform destroy`. This resource group is different from the `DNS_RESOURCE_GROUP` that should exist and contain DNS record.
-
-### Software
-
-You need to have the followin software installed:
-
+- bash 5 
+  - `brew install bash` 
+  - add `/opt/homebrew/opt/bash` to `/etc/shells`
+  - `sudo chsh -s "$(brew --prefix)/bin/bash" $USER`
 - az CLI
-- Terraform
+- OpenTofu
 - kubectl
 - helm
 - jq (jquery)
 - python3
 
-## Setup
+## Summary
 
-### 1. Provision AKS clusters
+This section will walk through Azure configuration and the config.sh configuration
 
-```
-tofu init
-tofu apply -auto-approve
-```
-Process typically takes 3-5 minutes.
+* Login in Azure
+* Check that you can get your subscription ID
+* Configure Azure to manage a subdomain of your DNS domain
+* Configure your domain name to delegate that subdomain to Azure
+* Find a region with sufficient quota for the two K8S cluster for Redis Enterprise
+* 
 
-### 2. Setup Redis Enterprise
+## Azure subscription and CLI
 
-```
-bash setup-haproxy.sh
-```
-This scripts configures Ingress controller, Redis Enterprise Operator, Redis Webhook and creates Redis Enterprise Cluster in `rec` namespace. 
-
-It would also load kubect cluster definitions into the kubectl kubeconfig file, so you can access both participating clusters.
-
-Setup itself usually takes less then a minute, but starting up Redis Enterprise pods within a cluster can take  up to 5-10 minutes.
-```
-"BootstrappingFirstPod"
-"Initializing"
-"Running"
+You need t be able to successfully authenticate your azure cli to the Azure Subscription:
+```shell
+az login
 ```
 
-As the status message turns to `"Running"` you can stop the script with ^C and proceed to the next step.
-
-### 3. Establish Active-Active connection between the clusters
-```
-bash setup-rerc.sh
-```
-This script would prepare RERC (Redis Enterprise Remote Cluster) resources and corresponding secrets and then load them into two participating clusters.
-
-You can inspect the generated resources under the `./yaml` folder. The same script would create (but not load!!!) Redis Enterprise Active Active Database (REAADB) resource as `./yaml/reaadb.yaml`
-
-### 4. Create Redis Active Active Database
-
-```
-./create-active-active-db.sh
+## Fetch Azure subscription ID
+```shell
+az account show --query id -o tsv
 ```
 
-Assuming previos steps went well you should be able to successfully create the Active Active Database
+ex: e48e7b4e-f9d8-4d23-81ac-d204f77b00ac (UUID v4 format)
 
-## Login to Redis Enterprise Admin UI
+## Azure DNS Zone
 
+Redis Enterprise ActiveActive requires FQDN (NOT the public IP) of the ingress services for both participating clusters. 
+In your Azure Subscription create DNS Zone and make sure it resolvable by the public DNS. 
+You can use a subdomain of the existing domain hosted elsewhere.
+
+### Azure DNS Zone creation
+
+Let's take the Top Level Domain like **paquerette.com**.
+
+We'll delegate a subdomain of this domain to Azure Name Servers to give FQDN to our clusters. For exemple : **demo.paquerette.com**.
+
+Update the config.sh with domain.
+
+```shell
+DNS_ZONE=demo.paquerette.com
 ```
-~/Projects/AKS-ActiveActive-Redis ➜ kubectl get svc -n rec
-NAME                    TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)             AGE
-admission               ClusterIP   10.0.122.17    <none>        443/TCP             6h43m
-crdb-anton              ClusterIP   10.0.235.190   <none>        12318/TCP           6h38m
-crdb-anton-headless     ClusterIP   None           <none>        12318/TCP           6h38m
-rec-redis-ukwest        ClusterIP   10.0.58.176    <none>        9443/TCP,8001/TCP   6h43m
-rec-redis-ukwest-prom   ClusterIP   None           <none>        8070/TCP            6h43m
-rec-redis-ukwest-ui     ClusterIP   10.0.111.193   <none>        8443/TCP            6h43m
 
-~/Projects/AKS-ActiveActive-Redis ➜ kubectl port-forward svc/rec-redis-ukwest-ui 8443:8443 -n rec
-Forwarding from 127.0.0.1:8443 -> 8443
-Forwarding from [::1]:8443 -> 8443
-Handling connection for 8443
-...
-``` 
-open a new terminal :
+Create the dns zone in Azure which will provide the Name Servers that will manage this subdomain.
 
+Choose a ResourceGroup, exemple "ThomasManson" and set it to config.sh
+
+```shell
+# Resource Group zone where DNS is defined
+DNS_RESOURCE_GROUP=ThomasManson
 ```
- kubectl get secret rec-redis-ukwest -n rec -o jsonpath="{.data.username}" | base64 --decode && echo
-demo@redis.com
-kubectl get secret rec-redis-ukwest -n rec -o jsonpath="{.data.password}" | base64 --decode && echo
-XXXXX
-```
-open 
-https://localhost:8443/#/
+And then run this command, replacing **_RESOURCE_GROUP_** with your resource group.
 
-and provide the credentials
+```shell
+az network dns zone create \
+  --resource-group RESOURCE_GROUP \
+  --name demo.paquerette.com
+
+{
+  "etag": "c....0",
+  "id": "/subscriptions/e....7/resourceGroups/thomasmanson/providers/Microsoft.Network/dnszones/demo.paquerette.com",
+  "location": "global",
+  "maxNumberOfRecordSets": 10000,
+  "name": "demo.paquerette.com",
+  "nameServers": [
+    "ns1-04.azure-dns.com.",
+    "ns2-04.azure-dns.net.",
+    "ns3-04.azure-dns.org.",
+    "ns4-04.azure-dns.info."
+  ],
+  "numberOfRecordSets": 2,
+  "resourceGroup": "thomasmanson",
+  "tags": {},
+  "type": "Microsoft.Network/dnszones",
+  "zoneType": "Public"
+}
+```
+Copy the nameservers array from the response to use the values in your DNS Zone.
+
+### Update a subdomain of your domain with Azure Name Servers
+
+Go to your registrar & edit the DNS zone of your domain as follow : 
+Don’t forget the trailing “.” at the end of the Azure DNS names.
+```
+demo 10800 IN NS ns1-04.azure-dns.com.
+demo 10800 IN NS ns2-04.azure-dns.net.
+demo 10800 IN NS ns3-04.azure-dns.org.
+demo 10800 IN NS ns4-04.azure-dns.info.
+```
+Verify (DNS propagation can take a few minutes, it's usually a matter of seconds these days) : 
+```shell
+~ ➜ dig NS demo.paquerette.com +short
+ns4-04.azure-dns.info.
+ns2-04.azure-dns.net.
+ns3-04.azure-dns.org.
+ns1-04.azure-dns.com.
+```
+
+## Azure regions
+
+Determine in which regions you want to have your two clusters setup
+You'll need to check that you have enough quota to successfully create them.
+
+### Check the current quota
+
+You need 24 CPU in per regions (3 nodes x8 CPUs x 2 regions) 
+
+List all regions : 
+```shell
+az account list-locations --output table
+```
+
+Check two regions that has at least 24 CPU per region
+
+```shell
+az vm list-usage --location francecentral --output table
+az vm list-usage --location ukwest --output table
+```
+Ensure that you have more than 24 in both regions you choose.
+
+Ex:
+```
+Standard Dv3 Family vCPUs                 0               10
+Standard DSv3 Family vCPUs                0               100
+```
+Both regions must support K8S & Identity.
+
+### Edit config.sh
+
+Edit the config.sh with the two regions
+
+```shell
+CLUSTER1=redis-francecentral
+CLUSTER2=redis-ukwest
+```
+
+### Edit the variables.tf with the machine family 
+ 
+```
+variable "instance_type" {
+  type        = string
+  default     = "Standard_D8s_v3"
+  description = "Instance type for the AKS cluster"
+}
+```
+DSv3 => D8s_v3 (8: 8vCPU per node)
+
+
+
+## Resource groups
+
+edit config.sh and define the resource group for the AKS Clusters.
+You should use a different resource group than the DNS_RESOURCE_GROUP, as the cost of DNS is close to 0$ and you can leave it configured _forever_, while AKS will cost quite some money.
+
+edit config.sh
+```shell
+RESOURCE_GROUP=ThomasManson-temp-AKS
+```
+
+# Create the two Redis Enterprise Cluster, set them as Active/Active and create an Active/Active DB
+
+```shell
+./create-all.sh
+```
+The script will create the AKS, Redis Enterprise Cluster & the Database.
+Watch the output to ensure that no error happens during the process.
+You may encounter errors like : not enough quota, Azure Identity Management not available
+
+This script takes about 10 minutes to complete, it spends some time to wait for AKS creation, K8S resource creation and availability...
+
+Upon completion, you have an Active/Active setup with a Active/Active DB setup.
+
+Here is a sample output of the script with cluster informations : 
+
+````
+=========================================
+⏱️ Execution Summary:
+• 01-create-cluster.sh           :  4 min 54 sec
+• 02-setup-haproxy.sh            :  4 min 06 sec
+• 03-setup-rerc.sh               :  0 min 03 sec
+• 04-create-active-active-db.sh  :  0 min 04 sec
+-----------------------------------------
+🔴 Total execution time          :  9 min 07 sec
+=========================================
+
+Switched to context "redis-francecentral".
+##############################################################################################################
+#📍 Cluster Name      : redis-francecentral
+#👤 Username          : account@domain.com
+#🔑 Password          : xxxxxx
+#🌐 FQDN              : rec-redis-francecentral.rec.svc.cluster.local
+#🔌 Connection String : active-active-db-db.redis-francecentral.demo.paquerette.com:443
+##############################################################################################################
+Switched to context "redis-ukwest".
+##############################################################################################################
+#📍 Cluster Name      : redis-ukwest
+#👤 Username          : account@domain.com
+#🔑 Password          : yyyyyyy
+#🌐 FQDN              : rec-redis-ukwest.rec.svc.cluster.local
+#🔌 Connection String : active-active-db-db.redis-ukwest.demo.paquerette.com:443
+##############################################################################################################
+````
+
+# Access to Redis Enterprise WebUI
+
+You may need it to access the WebUi for the demo and register your license.
+In case of the license, it need to be register on both nodes (this can also be scripted)
+
+## Get credentials
+
+check the output of `./create-all.sh` or run `./05-get-cluster-info.sh` to get username & password
+
+## Create a secure tunnel to the Redis Enterprise WebUI
+
+```shell
+./redis-enterprise-testing/webui-cluster1.sh
+```
+
+or
+
+```shell
+./redis-enterprise-testing/webui-cluster1.sh
+```
+
+This will create a secure connection, tunnel communication between your browser and Redis Enterprise Web UI.
+It will open your browser to https://localhost:8443 or https://localhost:8444
+
+
+
+
+
 
 
 ## Troubleshooting
 
-### Resources not fully provisioned
-
-`setup-haproxy.sh` might give errors such as `Error from server (NotFound): secrets "admission-tls" not found` - these are results of attempting to access resource that has not finished provisioning. Usually just restarting the bash script is enough to fix it.
-
 ### Collecting logs
 
-```
-./check-redis-enterprise-on-azure.sh
+```shell
+./redis-enterprise-testing/check-redis-enterprise-on-azure.sh
 ```
 
 Would collect logs and k8s resource statuses from various components of the setup in `./logs` folder.
@@ -268,4 +387,14 @@ Make sure you can access clusters in both regions and data entered another regio
 The following table summary of potential outage types:
 
 ![alt text](images/outages.png)
+
+## Credits
+This project is based on the work by [antonum](https://github.com/antonum/AKS-ActiveActive-Redis).
+
+ * Improvement on the scripting so that the cluster can be created in one run, with improved wait() to ensure resource creation on K8S
+ * Added an image to deploy on K8S to continuously query the DB while it's being scaled up/out
+ * Improve the use of variables so that it relies on config.sh only
+ * Some reorginasation, new scripts created for ease of use
+ * Switch to opentofu
+
 

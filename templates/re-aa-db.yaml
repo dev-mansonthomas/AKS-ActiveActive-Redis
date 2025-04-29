@@ -1,10 +1,10 @@
 apiVersion: app.redislabs.com/v1alpha1
 kind: RedisEnterpriseActiveActiveDatabase
 metadata:
-  name: crdb-anton
+  name: AA_DB_NAME
 spec:
   globalConfigurations:
-    #databaseSecretName: crdb-anton
+    #databaseSecretName: AA_DB_NAME
     memorySize: 200MB
     shardCount: 1
     replication: true

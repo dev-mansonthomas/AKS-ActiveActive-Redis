@@ -1,6 +1,46 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-./01-create-cluster.sh
-./02-setup-haproxy.sh
-./03-setup-rerc.sh
-./04-create-active-active-db.sh
+declare -A durations  # Stocke durée par script en secondes
+declare -a scripts    # Stocke l'ordre d'exécution
+
+measure_time() {
+  local script="$1"
+  local start_time=$(date +%s)
+
+  echo "🚀 Starting $script..."
+  ./"$script"
+
+  local end_time=$(date +%s)
+  local duration=$((end_time - start_time))  # Garde en secondes
+
+  durations["$script"]=$duration
+  scripts+=("$script")
+}
+
+
+# Exécution des scripts
+measure_time "01-create-cluster.sh"
+measure_time "02-setup-haproxy.sh"
+measure_time "03-setup-rerc.sh"
+measure_time "04-create-active-active-db.sh"
+
+# Résumé propre
+echo ""
+echo "========================================="
+echo "⏱️ Execution Summary:"
+total_duration=0
+for script in "${scripts[@]}"; do
+  duration=${durations[$script]}
+  minutes=$((duration / 60))
+  seconds=$((duration % 60))
+  printf "• %-30s : %2d min %02d sec\n" "$script" "$minutes" "$seconds"
+  total_duration=$((total_duration + duration))
+done
+echo "-----------------------------------------"
+total_minutes=$((total_duration / 60))
+total_seconds=$((total_duration % 60))
+printf "🔴 Total execution time         : %2d min %02d sec\n" "$total_minutes" "$total_seconds"
+echo "========================================="
+
+
+./05-get-cluster-info.sh

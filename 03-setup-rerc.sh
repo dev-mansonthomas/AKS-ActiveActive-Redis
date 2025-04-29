@@ -1,8 +1,17 @@
-#!/bin/bash
+#!/usr/bin/env bash
+
+########################################################################################################################
+#This script would prepare RERC (Redis Enterprise Remote Cluster) resources and corresponding secrets and then load
+#them into two participating clusters.
+#
+# You can inspect the generated resources under the `./yaml` folder. This script generate the
+# Redis Enterprise Active Active Database (RE-AA-DB) resource as `./yaml/re-aa-db.yaml`
+# re-aa-db.yaml is applied by 04-create-active-active-db.sh
+########################################################################################################################
 
 # load configuration options from file
 # change setting like cluster names, DNS zones etc in config.sh
-source config.sh
+. config.sh
 echo "Using configuration in config.sh:"
 cat config.sh
 
@@ -11,36 +20,20 @@ cat config.sh
 
 for CLUSTER in $CLUSTER1 $CLUSTER2
 do
-
-  echo "switching to $CLUSTER"
   kubectl config use-context $CLUSTER
   B64_USERNAME=$(kubectl -n $NS get secret -o json rec-$CLUSTER | jq .data.username)
   B64_PASSWORD=$(kubectl -n $NS get secret -o json rec-$CLUSTER | jq .data.password)
 
-  REC_UNAME=$(kubectl -n $NS get secret rec-$CLUSTER -o jsonpath='{.data.username}' | base64 --decode)
-  echo $REC_UNAME
-  REC_PASSWORD=$(kubectl -n $NS get secret rec-$CLUSTER -o jsonpath='{.data.password}' | base64 --decode)
-  echo $REC_PASSWORD
-
-  curl https://api.$CLUSTER.demo.umnikov.com:443/v1/cluster --insecure --connect-timeout 3\
-    -H "content-type: application/json" \
-    -u "$REC_UNAME:$REC_PASSWORD" \
-    | jq .name
-
   # create Redis Enterprise Remote Cluster Secret from template in templates folder
-  sed "s/CLUSTER/$CLUSTER/g" templates/rerc-secret.yaml > tmp.yaml
-  sed "s/B64_PASSWORD/$B64_PASSWORD/g" tmp.yaml > tmp1.yaml
-  sed "s/B64_USERNAME/$B64_USERNAME/g" tmp1.yaml > yaml/secret-$CLUSTER.yaml
-  rm tmp.yaml
-  rm tmp1.yaml
-
+  sed -e "s/CLUSTER/$CLUSTER/g" \
+      -e "s/B64_PASSWORD/$B64_PASSWORD/g" \
+      -e "s/B64_USERNAME/$B64_USERNAME/g" templates/rerc-secret.yaml > yaml/secret-$CLUSTER.yaml
 
   # create Redis Enterprise Remote Cluster template in templates folder
-  sed "s/DNS_ZONE/$DNS_ZONE/g" templates/rerc.yaml > tmp.yaml
-  sed "s/NAMESPACE/$NS/g" tmp.yaml > tmp1.yaml
-  sed "s/CLUSTER/$CLUSTER/g" tmp1.yaml > yaml/rerc-$CLUSTER.yaml
-  rm tmp.yaml
-  rm tmp1.yaml
+  sed -e "s/DNS_ZONE/$DNS_ZONE/g" \
+      -e "s/NAMESPACE/$NS/g"      \
+      -e "s/CLUSTER/$CLUSTER/g"   \
+      templates/rerc.yaml > yaml/rerc-$CLUSTER.yaml
 
 done
 
@@ -55,16 +48,3 @@ do
   kubectl -n $NS apply -f yaml/rerc-$CLUSTER1.yaml
   kubectl -n $NS apply -f yaml/rerc-$CLUSTER2.yaml
 done
-
-
-# create Redis Enterprise Remote Cluster template in templates folder
-sed "s/NAMESPACE/$NS/g" templates/re-aa-db.yaml > tmp.yaml
-sed "s/CLUSTER1/$CLUSTER1/g" tmp.yaml > tmp1.yaml
-sed "s/CLUSTER2/$CLUSTER2/g" tmp1.yaml > yaml/re-aa-db.yaml
-rm tmp.yaml
-rm tmp1.yaml
-
-
-echo "Active-Active database yaml is generated at: yaml/re-aa-db.yaml"
-echo "to activate on any of the clusters run: "
-echo "kubectl apply -n $NS -f yaml/re-aa-db.yaml"

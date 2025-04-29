@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 # load configuration options from file
 # change setting like cluster names, DNS zones etc in config.sh
 source config.sh

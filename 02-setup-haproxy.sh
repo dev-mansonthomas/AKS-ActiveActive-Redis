@@ -1,8 +1,15 @@
-#!/bin/bash
+#!/usr/bin/env bash
+########################################################################################################################
+#This scripts configures Ingress controller, Redis Enterprise Operator, Redis Webhook and creates Redis Enterprise
+# Cluster in `rec` namespace.
+#
+#It would also load kubect cluster definitions into the kubectl kubeconfig file, so you can access both participating
+# clusters.
+########################################################################################################################
 
 # load configuration options from file
 # change setting like cluster names, DNS zones etc in config.sh
-source config.sh
+. config.sh
 
 wait_until() {
   local cmd="$1"
@@ -60,7 +67,6 @@ do
   # Install Redis operator
   kubectl apply -n $NS -f https://raw.githubusercontent.com/RedisLabs/redis-enterprise-k8s-docs/master/bundle.yaml
 
-
   wait_until "kubectl -n \$NS get secret admission-tls >/dev/null 2>&1" 12 5 "Waiting for admission-tls secret in \$CLUSTER"
 
   CERT=$(kubectl -n $NS get secret admission-tls -o jsonpath='{.data.cert}')
@@ -74,9 +80,9 @@ do
   echo "✅ CRD $CRD_NAME is now available."
 
   # Create Redis Enterprise Cluster form template in templates folder
-  sed "s/DNS_ZONE/$DNS_ZONE/g" templates/rec.yaml > tmp.yaml
-  sed "s/CLUSTER/$CLUSTER/g" tmp.yaml > yaml/rec-$CLUSTER.yaml
-  rm tmp.yaml
+  sed -e "s/DNS_ZONE/$DNS_ZONE/g"  \
+      -e "s/CLUSTER/$CLUSTER/g"    \
+      templates/rec.yaml > yaml/rec-$CLUSTER.yaml
 
   # Apply RedisEnterpriseCluster spec
   kubectl apply -n $NS -f yaml/rec-$CLUSTER.yaml
@@ -102,9 +108,10 @@ do
   # TTL set very low for debug create/destroy cycle. can be omitted (default 3600) in prod
   az network dns record-set a add-record -g $DNS_RESOURCE_GROUP -z $DNS_ZONE -n "*.$CLUSTER" -a $CLUSTER_IP #--ttl 10
 
-  sed "s/NAMESPACE/$NS/g" templates/webhook.yaml > tmp.yaml
-  sed "s/CERT/$CERT/g" tmp.yaml > yaml/webhook-$CLUSTER.yaml
-  rm tmp.yaml
+  sed -e "s/NAMESPACE/$NS/g" \
+      -e "s/CERT/$CERT/g"    \
+      templates/webhook.yaml > yaml/webhook-$CLUSTER.yaml
+
   kubectl -n $NS apply -f yaml/webhook-$CLUSTER.yaml
 
 done

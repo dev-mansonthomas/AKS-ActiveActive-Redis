@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 echo "🔧 Installing Python dependencies in virtual environment (if not already active)..."
 if [ -z "$VIRTUAL_ENV" ]; then
     echo "⚠️  No virtual environment detected. Creating one"

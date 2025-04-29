@@ -1,3 +1,5 @@
+#!/usr/bin/env bash
+
 region=canadacentral
 kubectl config use-context "redis-$region"
 kubectl get nodes

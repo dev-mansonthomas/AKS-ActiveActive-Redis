@@ -17,6 +17,7 @@ def get_config_var(name):
         return None
 
 # Load configuration from config.sh
+aaDbName = get_config_var("AA_DB_NAME")
 cluster1 = get_config_var("CLUSTER1")
 cluster2 = get_config_var("CLUSTER2")
 cluster3 = get_config_var("CLUSTER3")
@@ -36,9 +37,9 @@ def randStr(chars=string.ascii_uppercase + string.digits, N=10):
 
 redis_clients = {}
 for region in regions:
-    log.info(f"🔌 Connecting to Redis cluster in region: {region} (host: crdb-anton-db.redis-{region}.{dns_suffix})")
+    log.info(f"🔌 Connecting to Redis cluster in region: {region} (host: {aaDbName}-db.redis-{region}.{dns_suffix})")
     redis_clients[region] = redis.StrictRedis(
-        host=f"crdb-anton-db.{region}.{dns_suffix}",
+        host=f"{aaDbName}-db.{region}.{dns_suffix}",
         port=443, db=0,
         ssl=True,
         ssl_cert_reqs=None,

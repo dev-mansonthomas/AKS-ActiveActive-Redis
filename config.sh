@@ -1,4 +1,6 @@
 RESOURCE_GROUP=ThomasManson-temp-AKS
+# DB Name pattern : ^[a-z]($|[a-z0-9-]*[a-z0-9])$
+AA_DB_NAME=active-active-db
 CLUSTER1=redis-francecentral
 CLUSTER2=redis-ukwest
 CLUSTER3=
