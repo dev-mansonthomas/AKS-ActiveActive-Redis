@@ -8,15 +8,16 @@ import json
 import urllib3
 urllib3.disable_warnings()
 
-def get_config_var(name):
+def get_config_var(name, config_path="../config.sh"):
     try:
-        value = subprocess.check_output(
-            f"source ../config.sh >/dev/null 2>&1 && echo -n ${name}",
-            shell=True,
-            executable="/bin/bash"
-        )
-        return value.decode("utf-8").strip() or None
-    except subprocess.CalledProcessError:
+        with open(config_path, "r") as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith(f"{name}="):
+                    value = line.split("=", 1)[1].strip().strip('"').strip("'")
+                    return value if value else None
+        return None
+    except FileNotFoundError:
         return None
 
 aaDbName = get_config_var("AA_DB_NAME")

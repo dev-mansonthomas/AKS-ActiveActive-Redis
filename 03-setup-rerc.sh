@@ -48,3 +48,17 @@ do
   kubectl -n $NS apply -f yaml/rerc-$CLUSTER1.yaml
   kubectl -n $NS apply -f yaml/rerc-$CLUSTER2.yaml
 done
+
+# We apply this update at the end because the necessary secrets (username/password) are created earlier in the script.
+echo "Updating UI session timeout on each cluster..."
+for CLUSTER in $CLUSTER1 $CLUSTER2
+do
+  kubectl config use-context $CLUSTER
+  ADMIN_PASSWORD=$(echo "$B64_PASSWORD" | base64 -d)
+  ADMIN_USERNAME=$(echo "$B64_USERNAME" | base64 -d)
+  UI_FQDN="https://$(kubectl get ingress -n $NS -o jsonpath='{.items[*].spec.rules[*].host}' | tr ' ' '\n' | grep -E '^api\.' | head -1)"
+  echo "🔧 Updating timeout on $CLUSTER ($UI_FQDN)..."
+  curl -s -k -u "$ADMIN_USERNAME:$ADMIN_PASSWORD" -X PATCH "$UI_FQDN/v1/settings/ui" \
+    -H "Content-Type: application/json" \
+    -d '{"ui_session_timeout": 86400}'
+done

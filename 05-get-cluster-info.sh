@@ -11,8 +11,11 @@ do
 
   URLS=($(kubectl get ingress -n rec -o jsonpath='{.items[*].spec.rules[*].host}'))
 
+  echo "${URLS[@]}"
   # Filtre celles qui contiennent "db"
   for url in "${URLS[@]}"; do
+    echo "$url"
+
     if [[ "$url" == *db* ]]; then
       DB_URL="$url"
       break
@@ -27,7 +30,7 @@ do
   echo "#👤 Username          : $USERNAME"
   echo "#🔑 Password          : $PASSWORD"
   echo "#🌐 FQDN              : $FQDN"
-  echo "#🔌 Connection String : $CONN_STR"
+  echo "#🔌 Connection String : rediss://$CONN_STR"
   echo "##############################################################################################################"
 
 done

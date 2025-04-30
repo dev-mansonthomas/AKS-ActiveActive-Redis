@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-benchmark-tls
+spec:
+  replicas: 1 # tells deployment to run 1 pods matching the template
+  selector:
+    matchLabels:
+      app: redis-benchmark-tls
+  template: # create pods using pod definition in this template
+    metadata:
+      labels:
+        app: redis-benchmark-tls
+    spec:
+      containers:
+      - name: benchmark
+        image: redislabs/memtier_benchmark
+        args: ["-a", "$(REDIS_PASSWORD)", "-s", "$(REDIS_SERVER)", "-p", "$(REDIS_PORT)", "--tls","--tls-skip-verify", "--sni", "$(REDIS_SERVER)", "--ratio=1:4", "--key-pattern=S:S",  "-d 50", "--requests=20000000", "--pipeline=30", "--clients=10", "--threads=8", "--run-count=3"]
+        resources:
+          limits:
+            cpu: "500m"
+            memory: "128Mi"
+          requests:
+            cpu: "250m"
+            memory: "128Mi"
+        env:
+            - name: REDIS_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: redb-bench-database
+                  key: port
+            - name: REDIS_SERVER
+              valueFrom:
+                secretKeyRef:
+                  name: redb-bench-database
+                  key: service_name
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redb-bench-database
+                  key: password

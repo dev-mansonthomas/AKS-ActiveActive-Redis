@@ -17,9 +17,9 @@ spec:
           image: thomasmanson458/redis-loadgen:latest
           env:
             - name: REDIS_HOST
-              value: "demo-scalable-db.rec.svc.cluster.local"
+              value: "mydb-db.rec.svc.cluster.local"
             - name: REDIS_PORT
-              value: "10001"
+              value: "18214"
           resources:
             limits:
               memory: "64Mi"

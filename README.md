@@ -28,6 +28,7 @@ _Software on your machine_
 - helm
 - jq (jquery)
 - python3
+- watch
 
 ## Summary
 
@@ -220,7 +221,7 @@ Switched to context "redis-francecentral".
 #👤 Username          : account@domain.com
 #🔑 Password          : xxxxxx
 #🌐 FQDN              : rec-redis-francecentral.rec.svc.cluster.local
-#🔌 Connection String : active-active-db-db.redis-francecentral.demo.paquerette.com:443
+#🔌 Connection String : rediss://active-active-db-db.redis-francecentral.demo.paquerette.com:443
 ##############################################################################################################
 Switched to context "redis-ukwest".
 ##############################################################################################################
@@ -228,7 +229,7 @@ Switched to context "redis-ukwest".
 #👤 Username          : account@domain.com
 #🔑 Password          : yyyyyyy
 #🌐 FQDN              : rec-redis-ukwest.rec.svc.cluster.local
-#🔌 Connection String : active-active-db-db.redis-ukwest.demo.paquerette.com:443
+#🔌 Connection String : rediss://active-active-db-db.redis-ukwest.demo.paquerette.com:443
 ##############################################################################################################
 ````
 
@@ -256,11 +257,71 @@ or
 This will create a secure connection, tunnel communication between your browser and Redis Enterprise Web UI.
 It will open your browser to https://localhost:8443 or https://localhost:8444
 
+# License
 
+If you don't have a license the Redis Enterprise will run for 30 days with a max of 4 shards per cluster 
+https://redis.io/docs/latest/operate/rs/clusters/configure/license-keys/
 
+To add a license : 
+* Connect to each of the web console
+  * https://localhost:8443/#/cluster/configuration/general
+  * https://localhost:8444/#/cluster/configuration/general
+* Go to the license tab, click "Change" and paste the license
+* Check that the number of shards increase from 4 to something more.
 
+# Connect Redis Insight to each cluster
 
+Use the connection string printed at the end of the creation of the cluster (or use `./05-get-cluster-info.sh` to get it again)
 
+* Give each a name that include the region
+* paste the connection string 
+  * ex: rediss://active-active-db-db.redis-ukwest.demo.paquerette.com:443
+*  Go to connection settings, security tab, and ensure that both TLS & SNI are checked
+
+# Showcase concurrent writes
+
+`./redis-enterprise-testing/launch_test.sh`
+
+Launch 2 instances of a python programs in the background and wait for their executions to complete.
+Each instance will connect to one region and increment 1000 times a counter.
+After the completion the value of the counter is printed and show 2000.
+
+Arguments : 
+* No argument, the increment will be done without a pipe, which showcase the importance of the latency, the region closer to the client will complete earlier
+* pipe :  pipe the increments, which makes the execution way faster
+* reset : reset the counter to 0 before starting the increments
+
+```
+ ./launch_test.sh pipe reset
+🔄 Resetting key...
+🚀 Launching parallel INCR...
+⏳ Waiting for process to finish :  29882, 29883
+🔁 Incrementing key 'counter' 1000 times on active-active-db-db.redis-francecentral.demo.paquerette.com:443 using pipeline mode...
+🔁 Incrementing key 'counter' 1000 times on active-active-db-db.redis-ukwest.demo.paquerette.com:443 using pipeline mode...
+✅ Done for active-active-db-db.redis-francecentral.demo.paquerette.com:443
+✅ Done for active-active-db-db.redis-ukwest.demo.paquerette.com:443
+⏳ Waiting for convergence...
+📥 Reading value from active-active-db-db.redis-francecentral.demo.paquerette.com
+🔎 Key 'counter' on active-active-db-db.redis-francecentral.demo.paquerette.com:443 = 2000
+```
+
+# Continuous Load v1
+
+* create a simple database
+  * `redis-enterprise-testing/standalone-db/01-created-db.sh`
+
+* Run the continuous load : 
+  * `redis-enterprise-testing/continuous_load/redeploy.sh`
+
+* Enable HA
+  * `redis-enterprise-testing/standalone-db/02-enable-HA.sh`
+* Increase RAM
+  * `redis-enterprise-testing/standalone-db/03-db-ram-increase.sh`
+* Increase shard count
+  * `redis-enterprise-testing/standalone-db/04-increase-shard-count-db.sh`
+
+* delete the db (in case you need to rerun)
+  * `redis-enterprise-testing/standalone-db/05-delete-db.sh`
 
 ## Troubleshooting
 
