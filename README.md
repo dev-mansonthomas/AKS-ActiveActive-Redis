@@ -245,13 +245,15 @@ check the output of `./create-all.sh` or run `./05-get-cluster-info.sh` to get u
 ## Create a secure tunnel to the Redis Enterprise WebUI
 
 ```shell
-./redis-enterprise-testing/webui-cluster1.sh
+cd /redis-enterprise-testing/
+./webui-cluster1.sh
 ```
 
 or
 
 ```shell
-./redis-enterprise-testing/webui-cluster1.sh
+cd /redis-enterprise-testing/
+./webui-cluster1.sh
 ```
 
 This will create a secure connection, tunnel communication between your browser and Redis Enterprise Web UI.
@@ -280,7 +282,10 @@ Use the connection string printed at the end of the creation of the cluster (or 
 
 # Showcase concurrent writes
 
-`./redis-enterprise-testing/launch_test.sh`
+```
+cd /redis-enterprise-testing/
+./launch_test.sh
+```
 
 Launch 2 instances of a python programs in the background and wait for their executions to complete.
 Each instance will connect to one region and increment 1000 times a counter.
@@ -307,21 +312,23 @@ Arguments :
 
 # Continuous Load v1
 
+`cd redis-enterprise-testing/standalone-db/`
+
 * create a simple database
-  * `redis-enterprise-testing/standalone-db/01-created-db.sh`
+  * `./01-created-db.sh`
 
 * Run the continuous load : 
-  * `redis-enterprise-testing/continuous_load/redeploy.sh`
+  * `./redeploy.sh`
 
 * Enable HA
-  * `redis-enterprise-testing/standalone-db/02-enable-HA.sh`
+  * `./02-enable-HA.sh`
 * Increase RAM
-  * `redis-enterprise-testing/standalone-db/03-db-ram-increase.sh`
+  * `./03-db-ram-increase.sh`
 * Increase shard count
-  * `redis-enterprise-testing/standalone-db/04-increase-shard-count-db.sh`
+  * `./04-increase-shard-count-db.sh`
 
 * delete the db (in case you need to rerun)
-  * `redis-enterprise-testing/standalone-db/05-delete-db.sh`
+  * `./05-delete-db.sh`
 
 ## Troubleshooting
 
