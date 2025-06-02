@@ -1,6 +1,6 @@
-# Deploying Redis Enterprise Active Active on AKS & Demo
+# Deploying Redis Enterprise Active/Active on AKS & Demo
 
-This repo contains deployment scripts and web monitoring dashboard for Active Active Redis Enterprise deployment in two Azure Regions.
+This repo contains deployment scripts and web monitoring dashboard for Active/Active Redis Enterprise deployment in two Azure Regions.
 This repo will allow you to showcase the 99.999% HA capabilities of RedisEnterprise
 
 ![alt text](images/flask_app.png)
@@ -111,7 +111,7 @@ Copy the nameservers array from the response to use the values in your DNS Zone.
 
 ### Update a subdomain of your domain with Azure Name Servers
 
-Go to your registrar & edit the DNS zone of your domain as follow : 
+Go to your registrar & edit the DNS zone of your domain as follows : 
 Don’t forget the trailing “.” at the end of the Azure DNS names.
 ```
 demo 10800 IN NS ns1-04.azure-dns.com.
@@ -182,7 +182,7 @@ DSv3 => D8s_v3 (8: 8vCPU per node)
 ## Resource groups
 
 edit config.sh and define the resource group for the AKS Clusters.
-You should use a different resource group than the DNS_RESOURCE_GROUP, as the cost of DNS is close to 0$ and you can leave it configured _forever_, while AKS will cost quite some money.
+You should use a different resource group than the DNS_RESOURCE_GROUP, as the cost of DNS is close to 0$, and you can leave it configured _forever_, while AKS will cost quite some money.
 
 edit config.sh
 ```shell
@@ -200,9 +200,9 @@ You may encounter errors like : not enough quota, Azure Identity Management not 
 
 This script takes about 10 minutes to complete, it spends some time to wait for AKS creation, K8S resource creation and availability...
 
-Upon completion, you have an Active/Active setup with a Active/Active DB setup.
+Upon completion, you have an Active/Active setup with an Active/Active DB setup.
 
-Here is a sample output of the script with cluster informations : 
+Here is a sample output of the script with cluster information : 
 
 ````
 =========================================
@@ -236,7 +236,7 @@ Switched to context "redis-ukwest".
 # Access to Redis Enterprise WebUI
 
 You may need it to access the WebUi for the demo and register your license.
-In case of the license, it need to be register on both nodes (this can also be scripted)
+In case of the license, it needs to be registered on both nodes (this can also be scripted)
 
 ## Get credentials
 
@@ -328,27 +328,21 @@ Arguments :
 ### Collecting logs
 
 ```shell
-./redis-enterprise-testing/check-redis-enterprise-on-azure.sh
+cd ./redis-enterprise-testing/
+./check-redis-enterprise-on-azure.sh
 ```
 
 Would collect logs and k8s resource statuses from various components of the setup in `./logs` folder.
 
 Alternatively you can use Log Collector as described here: https://docs.redis.com/latest/kubernetes/logs/collect-logs/
 
-### Redis Cluster Status
-
-```
-kubectl config use-context redis-canadacentral
-kubectl exec -it  -n rec  rec-redis-canadacentral-0 -- bash
-rladmin status
-```
 ## Web Dashboard
 
 ![alt text](images/flask_app.png)
 
 To enable Web UI for the demo run:
 ```
-python3 flask/app.py
+./launch-flask-console.sh
 ```
 and point your browser to `http://localhost:5000/`
 
@@ -356,106 +350,196 @@ and point your browser to `http://localhost:5000/`
 ## Testing access to the cluster
 
 Adjust test.py file to use selected regions and dns name:
-```
-region1="canadacentral"
-region2="canadaeast"
-dns_suffix="sademo.umnikov.com"
-```
 
 Run test:
 ```
-python3 test.py
+cd ./redis-enterprise-testing/
+./launch_test.sh
 ```
-This simple woul connect to Redis DB endpoints in both regions and measure:
+This simple test connects to Redis DB endpoints in both regions and measure:
 - avg ping time for endpoints in both regions
 - replication speed between the regions
 - Speed of setting large (6Mb keys)
 
-While it's possible to execute this test on your own laptop, it is recommended to run it in the region, designated as "region1". It would demostrate difference in the responce (ping) time between local and remote region and will test large keys with the local region.
-
-
+While it's possible to execute this test on your own laptop, 
+it is recommended to run it in the region, designated as "region1". 
+It would demonstrate difference in the response (ping) time between local and remote region and will test large keys with the local region.
 
 To test access from the redis command line `redis-cli` use:
 ```
-# Canada Central
-redis-cli --tls -h crdb-anton-db.redis-canadacentral.demo.umnikov.com -p 443  --insecure --sni crdb-anton-db.redis-canadacentral.demo.umnikov.com
-
-# East US
-redis-cli --tls -h crdb-anton-db.redis-eastus.demo.umnikov.com -p 443  --insecure --sni crdb-anton-db.redis-eastus.demo.umnikov.com
+cd ./redis-enterprise-testing/
+./cli-cluster1.sh
+or
+./cli-cluster2.sh
 ```
 
-You can execute comands such as:
-```
-# run in canadacentral
-set hello-from canada
+or use Redis Insight.
 
-# run in eastus
+You can execute commands such as:
+```
+# run in francecentral
+set hello-from france
+
+# run in ukwest
 get hello-from
-canada 
+france 
 ```
 
 ## Testing High Availability and Disaster Recovery
 
-```
-bash chaos.sh
-```
-would build up the commands specific to your environment (but not execute them!!!) that you can use in the next following steps.
+The `chaos.sh` script automates the full workflow for testing Redis Enterprise in Active-Active configuration across AKS regions.
 
-### Forcing the k8s level (pod) failure
+To launch the scenario:
 
-To simulate k8s level failure - force delete one of the redis enterprise pods.
-```
-kubectl delete pod rec-redis-canadacentral-0 -n rec --force
+```bash
+./chaos.sh
 ```
 
-### Emulating single node failure
+The script performs a sequence of failure and recovery operations automatically, pausing at each step to allow the user to observe system behavior or interact with RedisInsight or a web dashboard app.
 
-To emulate a failure of a single node you can forse restart one of the nodes of the AKS cluster.
-```
-az vmss restart  --name vmss \
---resource-group MC_ANTON-RG-AA-AKS_REDIS-CANADACENTRAL_CANADACENTRAL \
---instance-ids 1
-```
+> 💡 Tip: Before starting, ensure that the web dashboard application (`flask/app.py`) is running. This helps visualize data availability and failover in real time.
 
-With Replication enabled node restart even should be totally transparent to the application and the user. Note: application should be attempting reconnect in case of connection interruption (for instance - using `retry_on_error` conection flag in Python).
+---
 
-### Emulating Region outage
+### 🔁 What the script does — step by step (with key commands explained)
 
-To emulate the entire Region outage you can stop and restart the AKS cluster in that region. For example:
-```
-az aks stop --name redis-canadacentral --resource-group anton-rg-aa-aks
-# wait for the cluster to stop
+1. **Select a region**
 
-az aks start --name redis-canadacentral --resource-group anton-rg-aa-aks
-# wait for cluster to get back online
-```
+   You are prompted to choose a region (e.g., `redis-francecentral`, `redis-ukwest`) where chaos will be applied. This determines which AKS cluster the operations will target.
 
-While the one of the clusters is down - make sure that you still can access and set/retreive data from the cluster in another region.
+2. **Switch Kubernetes context to the selected AKS cluster**
 
-Since full cluster outage is also a loss of quorum (more than 50% of Redis Cluster nodes are down) recovery involves two additional steps on the Redis side:
-```
-# Recover from loss of quorum
-kubectl -n rec patch rec rec-redis-canadacentral --type merge --patch '{"spec":{"clusterRecovery":true}}'
-watch "kubectl -n rec describe rec | grep State"
-# wait for "Running" state
+   ```bash
+   kubectl config use-context redis-francecentral
+   ```
 
+   This ensures that subsequent `kubectl` commands apply to the correct Kubernetes cluster.
 
-# Recover databases
-kubectl exec -it  -n rec  rec-redis-canadacentral-0 -- rladmin recover all
-```
-Make sure you can access clusters in both regions and data entered another region during the outage is accasibble in the region recoverd from the outage.
+3. **Show the nodes of the cluster**
+
+   ```bash
+   kubectl get nodes
+   ```
+
+   Used to display the AKS worker nodes hosting Redis Enterprise pods.
+
+4. **Simulate a Kubernetes-level failure**
+
+   ```bash
+   kubectl delete pod rec-redis-francecentral-0 -n rec --force
+   ```
+
+   This forcibly deletes a Redis pod. Kubernetes should automatically reschedule a new one. Redis Enterprise handles this transparently if replication is working correctly.
+
+5. **Wait until the Redis cluster recovers**
+
+   The script monitors the number and status of pods, and checks Redis cluster health via:
+
+   ```bash
+   kubectl exec -n rec rec-redis-francecentral-0 -- rladmin status
+   ```
+
+6. **Simulate a VM-level failure (node restart)**
+
+   ```bash
+   az vmss restart --name VMSS_NAME --resource-group RESOURCE_GROUP --instance-ids 1
+   ```
+
+   This restarts one of the underlying Virtual Machine Scale Set instances where Redis runs. The expectation is that Redis replication will prevent any impact to the application.
+
+7. **Wait for all pods to return and Redis to be healthy**
+
+   Same health check as step 5.
+
+8. **Simulate a regional outage**
+
+   ```bash
+   az aks stop --name redis-francecentral --resource-group RESOURCE_GROUP
+   ```
+
+   This stops the AKS cluster entirely — simulating a full region outage (network loss, power cut, etc.).
+
+   While this region is down, your application should continue working using the other Redis Enterprise region.
+
+9. **Restart the AKS cluster after some time**
+
+   ```bash
+   az aks start --name redis-francecentral --resource-group RESOURCE_GROUP
+   ```
+
+   This brings the cluster back online.
+
+10. **Recover the Redis Enterprise cluster object after quorum loss**
+
+  ```bash
+  kubectl -n rec patch rec rec-redis-francecentral --type merge --patch '{"spec":{"clusterRecovery":true}}'
+  ```
+  
+  Redis Enterprise detects a quorum loss during the outage. This command explicitly tells Redis to rejoin and rebuild the cluster metadata.
+  
+  You can monitor its recovery with:
+  
+  ```bash
+  watch "kubectl -n rec describe rec | grep State"
+  ```
+  
+  Wait until the state is `Running`.
+
+11. **Recover databases on the recovered region**
+
+  ```bash
+  kubectl exec -it -n rec rec-redis-francecentral-0 -- rladmin recover all
+  ```
+  
+  Once the cluster object is back online, this command tells Redis to rejoin the database replication and resync data.
+  
+  ---
+
+  ✅ After Recovery
+  
+  Once all steps are completed:
+  
+  * Check data availability from both regions
+  * Validate that changes made during the outage (on the healthy region) are visible in the recovered region
+
+---
 
 The following table summary of potential outage types:
 
 ![alt text](images/outages.png)
 
-## Credits
+
+# Don't forget to delete the whole setup
+
+Save the planet 🌍 and some 💸
+
+```
+./delete-all-resources.sh
+
+...
+Destroy complete! Resources: 3 destroyed.
+Cleaning up Redis-related Kubernetes resources...
+⛔ Deleting namespace rec in cluster redis-francecentral...
+⛔ Deleting ingress-controller namespace in cluster redis-francecentral...
+⛔ Forcing Helm uninstall of haproxy-ingress (if still tracked) in redis-francecentral...
+⛔ Deleting namespace rec in cluster redis-ukwest...
+⛔ Deleting ingress-controller namespace in cluster redis-ukwest...
+⛔ Forcing Helm uninstall of haproxy-ingress (if still tracked) in redis-ukwest...
+Cleaning up DNS entries in Azure...
+Cleanup complete.
+=========================================
+⏱️ Total execution time: 6 minutes
+=========================================
+```
+
+# Credits
 This project is based on the work by [antonum](https://github.com/antonum/AKS-ActiveActive-Redis).
 
  * Improvement on the scripting so that the cluster can be created in one run, with improved wait() to ensure resource creation on K8S
  * Added an image to deploy on K8S to continuously query the DB while it's being scaled up/out
  * Improve the use of variables so that it relies on config.sh only
- * Some reorginasation, new scripts created for ease of use
+ * chaos.sh : automate every action for HA testing, using config.sh
+ * Some reorganisation, new scripts created for ease of use
  * Switch to opentofu
 
 

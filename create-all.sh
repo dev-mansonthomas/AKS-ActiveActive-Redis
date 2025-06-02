@@ -42,5 +42,7 @@ total_seconds=$((total_duration % 60))
 printf "🔴 Total execution time         : %2d min %02d sec\n" "$total_minutes" "$total_seconds"
 echo "========================================="
 
+echo "Waiting 5 seconds - otherwise some info are missing"
+sleep 5
 
 ./05-get-cluster-info.sh

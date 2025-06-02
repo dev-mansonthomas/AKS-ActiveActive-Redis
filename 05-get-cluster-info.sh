@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 . config.sh
-
+i=1
 for CLUSTER in $CLUSTER1 $CLUSTER2
 do
   kubectl config use-context $CLUSTER
@@ -11,10 +11,8 @@ do
 
   URLS=($(kubectl get ingress -n rec -o jsonpath='{.items[*].spec.rules[*].host}'))
 
-  echo "${URLS[@]}"
   # Filtre celles qui contiennent "db"
   for url in "${URLS[@]}"; do
-    echo "$url"
 
     if [[ "$url" == *db* ]]; then
       DB_URL="$url"
@@ -31,6 +29,7 @@ do
   echo "#🔑 Password          : $PASSWORD"
   echo "#🌐 FQDN              : $FQDN"
   echo "#🔌 Connection String : rediss://$CONN_STR"
+  echo "#🖥 RE UI access      : 'cd redis-enterprise-testing' './webui-cluster${i}.sh'"
   echo "##############################################################################################################"
-
+  i=$((i+1))
 done

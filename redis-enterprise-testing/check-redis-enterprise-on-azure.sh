@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # load configuration options from file
 # change setting like cluster names, DNS zones etc in config.sh
-source config.sh
+source ../config.sh
 echo "Using configuration in config.sh:"
 cat config.sh
 
 
 echo "removing existing logs if any"
 mkdir -p ../logs
-rm ../logs/*.*
+rm -f ../logs/*.*
 
 for CLUSTER in $CLUSTER1 $CLUSTER2
 do
