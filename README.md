@@ -26,9 +26,8 @@ _Software on your machine_
 - OpenTofu
 - kubectl
 - helm
-- jq (jquery)
+- jq
 - python3
-- watch
 
 ## Summary
 
