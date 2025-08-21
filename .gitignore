@@ -19,3 +19,6 @@ logs/*
 
 #Générated yaml
 yaml/*
+
+.DS_Store
+nohup.out
