@@ -325,9 +325,11 @@ Arguments :
   * `./03-db-ram-increase.sh`
 * Increase shard count
   * `./04-increase-shard-count-db.sh`
+* Upgrade DB from 7.2 to 7.4
+  * `./05-upgrade-db-to-last-version.sh`
 
 * delete the db (in case you need to rerun)
-  * `./05-delete-db.sh`
+  * `./06-delete-db.sh`
 
 ## Troubleshooting
 
