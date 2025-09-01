@@ -550,3 +550,7 @@ This project is based on the work by [antonum](https://github.com/antonum/AKS-Ac
  * Switch to opentofu
 
 
+# Todo
+ * JSON & Search on Active/Active DB
+ * Rackzone awareness
+ * Flash

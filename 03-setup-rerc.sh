@@ -54,6 +54,9 @@ echo "Updating UI session timeout on each cluster..."
 for CLUSTER in $CLUSTER1 $CLUSTER2
 do
   kubectl config use-context $CLUSTER
+  B64_USERNAME=$(kubectl -n $NS get secret -o json rec-$CLUSTER | jq .data.username)
+  B64_PASSWORD=$(kubectl -n $NS get secret -o json rec-$CLUSTER | jq .data.password)
+
   ADMIN_PASSWORD=$(echo "$B64_PASSWORD" | base64 -d)
   ADMIN_USERNAME=$(echo "$B64_USERNAME" | base64 -d)
   UI_FQDN="https://$(kubectl get ingress -n $NS -o jsonpath='{.items[*].spec.rules[*].host}' | tr ' ' '\n' | grep -E '^api\.' | head -1)"

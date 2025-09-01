@@ -3,7 +3,11 @@ kind: RedisEnterpriseDatabase
 metadata:
   name: mydb
 spec:
-  memorySize: 1GB
+  memorySize: 4GB
+  replication: true
   databasePort: 12001
   databaseSecretName: mydb-noauth
-  redisVersion: "7.2"
+  redisVersion: "7.4"
+  shardCount: 2
+  shardsPlacement: sparse
+  proxyPolicy: all-master-shards

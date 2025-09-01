@@ -5,4 +5,9 @@ metadata:
 spec:
   memorySize: 4GB
   replication: true
+  databasePort: 12001
+  databaseSecretName: mydb-noauth
+  redisVersion: "7.2"
   shardCount: 2
+  shardsPlacement: sparse
+  proxyPolicy: all-master-shards

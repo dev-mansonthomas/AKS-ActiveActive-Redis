@@ -28,10 +28,10 @@ if use_pipeline:
     pipe = r.pipeline()
     for i in range(count):
         pipe.incr(key)
-        if (i + 1) % 100 == 0:
+        if (i + 1) % 10 == 0:
             pipe.execute()
             time.sleep(0.01)
-    if count % 100 != 0:
+    if count % 10 != 0:
         pipe.execute()
 else:
     for _ in range(count):

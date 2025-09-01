@@ -4,6 +4,10 @@ metadata:
   name: rec-CLUSTER
 spec:
   # Add fields here
+#  rackAwarenessNodeLabel: "topology.kubernetes.io/zone"
+#  redisOnFlashSpec:
+#    enabled: true
+#    storageClassName: managed-premium
   ingressOrRouteSpec:
     apiFqdnUrl: api.CLUSTER.DNS_ZONE
     dbFqdnSuffix: -db.CLUSTER.DNS_ZONE
