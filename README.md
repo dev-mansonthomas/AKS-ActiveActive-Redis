@@ -80,11 +80,11 @@ Choose a ResourceGroup, exemple "ThomasManson" and set it to config.sh
 # Resource Group zone where DNS is defined
 DNS_RESOURCE_GROUP=ThomasManson
 ```
-And then run this command, replacing **_RESOURCE_GROUP_** with your resource group.
+And then run this command, replacing **_DNS_RESOURCE_GROUP_** with your DNS resource group (e.g., ThomasManson).
 
 ```shell
 az network dns zone create \
-  --resource-group RESOURCE_GROUP \
+  --resource-group DNS_RESOURCE_GROUP \
   --name demo.paquerette.com
 
 {
@@ -180,13 +180,50 @@ DSv3 => D8s_v3 (8: 8vCPU per node)
 
 ## Resource groups
 
-edit config.sh and define the resource group for the AKS Clusters.
+Edit config.sh and define the resource group for the AKS Clusters.
 You should use a different resource group than the DNS_RESOURCE_GROUP, as the cost of DNS is close to 0$, and you can leave it configured _forever_, while AKS will cost quite some money.
 
-edit config.sh
+Edit config.sh:
 ```shell
-RESOURCE_GROUP=ThomasManson-temp-AKS
+CLUSTER_RESOURCE_GROUP=ThomasManson-temp-AKS
 ```
+
+**Important**:
+- `CLUSTER_RESOURCE_GROUP`: Contains all AKS infrastructure (temporary, expensive)
+- `DNS_RESOURCE_GROUP`: Contains only the DNS Zone (permanent, almost free)
+
+This separation allows you to delete the AKS clusters after demos while keeping your DNS configuration intact.
+
+## Azure Resource Tags
+
+Edit config.sh to add resource tags for compliance and cost tracking:
+
+```shell
+# Owner tag (format: firstname_lastname, lowercase)
+owner=thomas_manson
+
+# Skip deletion tag (prevents accidental deletion)
+skip_deletion=yes
+```
+
+These tags will be automatically applied to all Azure resources (resource groups and AKS clusters).
+
+## Configuration Summary
+
+Here's a complete overview of all `config.sh` variables:
+
+| Variable | Description | Example | Required |
+|----------|-------------|---------|----------|
+| `CLUSTER_RESOURCE_GROUP` | Resource group for AKS clusters (temporary) | `ThomasManson-temp-AKS` | ✅ Yes |
+| `DNS_RESOURCE_GROUP` | Resource group for DNS Zone (permanent) | `ThomasManson` | ✅ Yes |
+| `AA_DB_NAME` | Active/Active database name | `active-active-db` | ✅ Yes |
+| `CLUSTER1` | Primary cluster name (region 1) | `redis-francecentral` | ✅ Yes |
+| `CLUSTER2` | Secondary cluster name (region 2) | `redis-ukwest` | ✅ Yes |
+| `CLUSTER3` | Optional third cluster | _(leave empty)_ | ❌ No |
+| `DNS_ZONE` | Azure DNS Zone for FQDNs | `demo.paquerette.com` | ✅ Yes |
+| `NS` | Kubernetes namespace for Redis | `rec` | ✅ Yes |
+| `owner` | Owner tag (firstname_lastname) | `thomas_manson` | ✅ Yes |
+| `skip_deletion` | Prevent accidental deletion | `yes` or `no` | ✅ Yes |
 
 # Create the two Redis Enterprise Cluster, set them as Active/Active and create an Active/Active DB
 
@@ -450,7 +487,7 @@ The script performs a sequence of failure and recovery operations automatically,
 6. **Simulate a VM-level failure (node restart)**
 
    ```bash
-   az vmss restart --name VMSS_NAME --resource-group RESOURCE_GROUP --instance-ids 1
+   az vmss restart --name VMSS_NAME --resource-group CLUSTER_RESOURCE_GROUP --instance-ids 1
    ```
 
    This restarts one of the underlying Virtual Machine Scale Set instances where Redis runs. The expectation is that Redis replication will prevent any impact to the application.
@@ -462,7 +499,7 @@ The script performs a sequence of failure and recovery operations automatically,
 8. **Simulate a regional outage**
 
    ```bash
-   az aks stop --name redis-francecentral --resource-group RESOURCE_GROUP
+   az aks stop --name redis-francecentral --resource-group CLUSTER_RESOURCE_GROUP
    ```
 
    This stops the AKS cluster entirely — simulating a full region outage (network loss, power cut, etc.).
@@ -472,7 +509,7 @@ The script performs a sequence of failure and recovery operations automatically,
 9. **Restart the AKS cluster after some time**
 
    ```bash
-   az aks start --name redis-francecentral --resource-group RESOURCE_GROUP
+   az aks start --name redis-francecentral --resource-group CLUSTER_RESOURCE_GROUP
    ```
 
    This brings the cluster back online.

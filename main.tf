@@ -7,6 +7,11 @@ provider "azurerm" {
 resource "azurerm_resource_group" "rg" {
   location = var.region1
   name     = var.azure_rg
+
+  tags = {
+    owner         = var.owner
+    skip_deletion = var.skip_deletion
+  }
 }
 
 resource "azurerm_kubernetes_cluster" "k8s1" {
@@ -24,10 +29,15 @@ resource "azurerm_kubernetes_cluster" "k8s1" {
     vm_size    = var.instance_type
     node_count = 3
   }
-  
+
   network_profile {
     network_plugin    = "kubenet"
     load_balancer_sku = "standard"
+  }
+
+  tags = {
+    owner         = var.owner
+    skip_deletion = var.skip_deletion
   }
 }
 
@@ -46,9 +56,14 @@ resource "azurerm_kubernetes_cluster" "k8s2" {
     vm_size    = var.instance_type
     node_count = 3
   }
-  
+
   network_profile {
     network_plugin    = "kubenet"
     load_balancer_sku = "standard"
+  }
+
+  tags = {
+    owner         = var.owner
+    skip_deletion = var.skip_deletion
   }
 }

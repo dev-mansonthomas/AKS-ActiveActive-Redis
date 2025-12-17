@@ -45,8 +45,8 @@ helm repo add haproxy-ingress https://haproxy-ingress.github.io/charts
 helm repo update
 
 # get defined clusters in kube config
-az aks get-credentials -g $RESOURCE_GROUP  --name $CLUSTER1 --context $CLUSTER1 --overwrite-existing
-az aks get-credentials -g $RESOURCE_GROUP  --name $CLUSTER2 --context $CLUSTER2 --overwrite-existing
+az aks get-credentials -g $CLUSTER_RESOURCE_GROUP  --name $CLUSTER1 --context $CLUSTER1 --overwrite-existing
+az aks get-credentials -g $CLUSTER_RESOURCE_GROUP  --name $CLUSTER2 --context $CLUSTER2 --overwrite-existing
 
 # cleaning up ./yaml directory
 rm ./yaml/*.yaml

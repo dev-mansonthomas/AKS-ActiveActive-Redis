@@ -59,3 +59,5 @@ sleep 2
 # Get final value
 echo "📥 Reading value from $HOST1"
 python3 get_key.py $HOST1 $PORT $KEY
+echo "📥 Reading value from $HOST2"
+python3 get_key.py $HOST2 $PORT $KEY

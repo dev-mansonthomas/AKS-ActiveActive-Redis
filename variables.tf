@@ -31,3 +31,14 @@ variable "subscription_id" {
   type        = string
   description = "Azure subscription ID"
 }
+
+variable "owner" {
+  type        = string
+  description = "Owner tag value (format: firstname_lastname, lowercase)"
+}
+
+variable "skip_deletion" {
+  type        = string
+  default     = "yes"
+  description = "Skip deletion tag value (yes or no)"
+}

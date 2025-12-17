@@ -163,11 +163,11 @@ wait_for_cluster_to_recover "$expected_pod_count" "$NS"
 wait_for_user "Simulating a region outage by stopping the AKS cluster in region '$region'"
 
 echo "Stopping AKS cluster in $region"
-az aks stop --name "$region" --resource-group "$RESOURCE_GROUP"
+az aks stop --name "$region" --resource-group "$CLUSTER_RESOURCE_GROUP"
 
 echo "Waiting for AKS cluster '$region' to fully stop..."
 while true; do
-  state=$(az aks show --name "$region" --resource-group "$RESOURCE_GROUP" --query "powerState.code" -o tsv 2>/dev/null || echo "Unavailable")
+  state=$(az aks show --name "$region" --resource-group "$CLUSTER_RESOURCE_GROUP" --query "powerState.code" -o tsv 2>/dev/null || echo "Unavailable")
   echo "Current powerState: '$state'"
   if [[ "$state" == "Stopped" ]]; then
     echo "Cluster $region is stopped."
@@ -179,12 +179,12 @@ done
 
 wait_for_user "DO : Test that you can access data from the other region with Redis Insight, before restarting the region"
 
-echo "Restarting AKS cluster in region:'$region', resource-groupe:'$RESOURCE_GROUP' "
-az aks start --name "$region" --resource-group "$RESOURCE_GROUP"
+echo "Restarting AKS cluster in region:'$region', resource-groupe:'$CLUSTER_RESOURCE_GROUP' "
+az aks start --name "$region" --resource-group "$CLUSTER_RESOURCE_GROUP"
 
 echo "Waiting for AKS cluster '$region' to fully Running..."
 while true; do
-  state=$(az aks show --name "$region" --resource-group "$RESOURCE_GROUP" --query "powerState.code" -o tsv 2>/dev/null || echo "Unavailable")
+  state=$(az aks show --name "$region" --resource-group "$CLUSTER_RESOURCE_GROUP" --query "powerState.code" -o tsv 2>/dev/null || echo "Unavailable")
   echo "Current powerState: '$state'"
   if [[ "$state" == "Running" ]]; then
     echo "Cluster $region is running."

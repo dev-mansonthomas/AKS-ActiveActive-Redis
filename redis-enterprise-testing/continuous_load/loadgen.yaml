@@ -17,7 +17,7 @@ spec:
           image: thomasmanson458/redis-loadgen:latest
           env:
             - name: REDIS_HOST
-              value: "10.244.0.13"
+              value: "10.244.2.4"
             - name: REDIS_PORT
               value: "12001"
           resources:
