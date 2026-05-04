@@ -139,7 +139,7 @@ case $CLOUD_PROVIDER in
     source ./scripts/check-tags-aws.sh
     ;;
   gcp)
-    echo -e "${YELLOW}⚠ GCP tag validation not yet implemented${NC}"
+    source ./scripts/check-tags-gcp.sh
     ;;
   *)
     echo -e "${RED}✗ Unknown cloud provider: $CLOUD_PROVIDER${NC}"
