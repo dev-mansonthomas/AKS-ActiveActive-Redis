@@ -1,33 +1,33 @@
 #!/usr/bin/env bash
 # ============================================================================
-# AWS EKS - Get Kubernetes Credentials
+# AWS EKS — load kubeconfig contexts
 # ============================================================================
-# This script retrieves kubeconfig credentials for both EKS clusters
+# Contract: on exit, kubectl has contexts named exactly $CLUSTER1 and $CLUSTER2
+# (as derived in config.sh). Steps 02-05 rely on those names.
+# Run from anywhere. HOST ONLY — needs aws auth.
 # ============================================================================
 
-set -e
+set -uo pipefail
 
-# Load configuration
-source ../../config.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/common/lib.sh"
 
-echo "🔑 Configuring kubectl credentials for AWS EKS clusters..."
+re_load_config
 
-# Get credentials for Region 1
-echo "📍 Getting credentials for cluster: redis-${AWS_REGION1}"
-aws eks update-kubeconfig \
-  --region "${AWS_REGION1}" \
-  --name "redis-${AWS_REGION1}" \
-  --alias "redis-${AWS_REGION1}"
+re_log "🔑 Configuring kubectl for EKS"
 
-# Get credentials for Region 2
-echo "📍 Getting credentials for cluster: redis-${AWS_REGION2}"
-aws eks update-kubeconfig \
-  --region "${AWS_REGION2}" \
-  --name "redis-${AWS_REGION2}" \
-  --alias "redis-${AWS_REGION2}"
+for pair in "$CLUSTER1:$AWS_REGION1" "$CLUSTER2:$AWS_REGION2"; do
+  cluster="${pair%%:*}"
+  region="${pair##*:}"
 
-echo "✅ Kubectl credentials configured successfully!"
-echo ""
-echo "Test with:"
-echo "  kubectl get nodes --context=redis-${AWS_REGION1}"
-echo "  kubectl get nodes --context=redis-${AWS_REGION2}"
+  re_log "📍 $cluster ($region)"
+  # --alias sets the context name directly, avoiding the default ARN name.
+  re_run aws eks update-kubeconfig \
+    --name "$cluster" --region "$region" --alias "$cluster" \
+    || re_die "failed to get credentials for $cluster in $region"
+
+  kubectl config get-contexts -o name 2>/dev/null | grep -qx "$cluster" \
+    || re_die "context '$cluster' not present after update-kubeconfig"
+  re_log "✅ context $cluster ready"
+done
+
+re_log "✅ kubectl configured for $CLUSTER1 and $CLUSTER2"

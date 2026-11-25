@@ -9,11 +9,11 @@
 # ============================================================================
 
 terraform {
-  required_version = ">= 1.0"
+  required_version = ">= 1.6"
   required_providers {
     google = {
       source  = "hashicorp/google"
-      version = "~> 5.0"
+      version = "~> 8.1"
     }
   }
 }
@@ -30,7 +30,7 @@ provider "google" {
     owner         = var.owner
     skip_deletion = var.skip_deletion
     managed_by    = "terraform"
-    project_name  = "redis-enterprise-aa"
+    project_name  = "${var.cluster_prefix}-enterprise-aa"
   }
 }
 
@@ -39,7 +39,7 @@ provider "google" {
 # ============================================================================
 
 resource "google_compute_network" "vpc" {
-  name                    = "redis-vpc"
+  name                    = "${var.cluster_prefix}-vpc"
   auto_create_subnetworks = false
   routing_mode            = "GLOBAL"
 
@@ -51,20 +51,20 @@ resource "google_compute_network" "vpc" {
 # ============================================================================
 
 resource "google_compute_subnetwork" "region1" {
-  name          = "redis-subnet-${var.region1}"
-  ip_cidr_range = "10.0.0.0/20"
+  name          = "${var.cluster_prefix}-subnet-${var.region1}"
+  ip_cidr_range = var.subnet_cidr1
   region        = var.region1
   network       = google_compute_network.vpc.id
 
   # Secondary IP ranges for GKE pods and services
   secondary_ip_range {
     range_name    = "pods"
-    ip_cidr_range = "10.0.16.0/20"
+    ip_cidr_range = var.pods_cidr1
   }
 
   secondary_ip_range {
     range_name    = "services"
-    ip_cidr_range = "10.0.32.0/20"
+    ip_cidr_range = var.services_cidr1
   }
 
   description = "Subnet for GKE cluster in ${var.region1}"
@@ -75,20 +75,20 @@ resource "google_compute_subnetwork" "region1" {
 # ============================================================================
 
 resource "google_compute_subnetwork" "region2" {
-  name          = "redis-subnet-${var.region2}"
-  ip_cidr_range = "10.1.0.0/20"
+  name          = "${var.cluster_prefix}-subnet-${var.region2}"
+  ip_cidr_range = var.subnet_cidr2
   region        = var.region2
   network       = google_compute_network.vpc.id
 
   # Secondary IP ranges for GKE pods and services
   secondary_ip_range {
     range_name    = "pods"
-    ip_cidr_range = "10.1.16.0/20"
+    ip_cidr_range = var.pods_cidr2
   }
 
   secondary_ip_range {
     range_name    = "services"
-    ip_cidr_range = "10.1.32.0/20"
+    ip_cidr_range = var.services_cidr2
   }
 
   description = "Subnet for GKE cluster in ${var.region2}"
@@ -99,7 +99,7 @@ resource "google_compute_subnetwork" "region2" {
 # ============================================================================
 
 resource "google_compute_firewall" "allow_internal" {
-  name    = "redis-allow-internal"
+  name    = "${var.cluster_prefix}-allow-internal"
   network = google_compute_network.vpc.name
 
   allow {
@@ -121,12 +121,12 @@ resource "google_compute_firewall" "allow_internal" {
 }
 
 resource "google_compute_firewall" "allow_redis" {
-  name    = "redis-allow-redis-ports"
+  name    = "${var.cluster_prefix}-allow-redis-ports"
   network = google_compute_network.vpc.name
 
   allow {
     protocol = "tcp"
-    ports    = ["8001", "8443", "9443", "10000-19999"]
+    ports    = var.redis_ports
   }
 
   source_ranges = ["0.0.0.0/0"]
@@ -138,16 +138,29 @@ resource "google_compute_firewall" "allow_redis" {
 # ============================================================================
 
 resource "google_container_cluster" "region1" {
-  name     = "redis-${var.region1}"
+  name     = "${var.cluster_prefix}-${var.region1}"
   location = var.region1
 
-  # Use regional cluster for high availability
-  node_locations = []
+  # Regional cluster, with the zone spread stated explicitly rather than left
+  # to GKE's default. One Redis Enterprise node lands per zone.
+  node_locations = var.zones1
 
   network    = google_compute_network.vpc.name
   subnetwork = google_compute_subnetwork.region1.name
 
-  # Start with minimal node pool (will be replaced by managed node pool)
+  # GKE always creates a default node pool; we throw it away and attach the
+  # managed one below. initial_node_count MUST be > 0 or the API rejects the
+  # cluster with 400 "initial_node_count must be greater than zero".
+  remove_default_node_pool = true
+  initial_node_count       = var.initial_node_count
+  # Deliberately NOT configurable. The google provider defaults this to true
+  # since v6.0, which makes `tofu destroy` fail with:
+  #   "Cannot destroy cluster because deletion_protection is set to true"
+  # This rig is a disposable demo whose premise is one command up, one command
+  # down (docs/product/PRD.md P2/P4), so protection here would break the
+  # product. Exposing it in config.sh would only invite someone to set it true
+  # and lose the ability to tear down.
+  deletion_protection = false
 
 
   # IP allocation for pods and services
@@ -181,17 +194,23 @@ resource "google_container_cluster" "region1" {
 
   # Release channel
   release_channel {
-    channel = "REGULAR"
+    channel = var.release_channel
   }
 
   resource_labels = {
     owner         = var.owner
     skip_deletion = var.skip_deletion
   }
+
+  timeouts {
+    create = var.cluster_timeout
+    update = var.cluster_timeout
+    delete = var.cluster_timeout
+  }
 }
 
 resource "google_container_node_pool" "region1" {
-  name       = "redis-${var.region1}-nodes"
+  name       = "${var.cluster_prefix}-${var.region1}-nodes"
   location   = var.region1
   cluster    = google_container_cluster.region1.name
   node_count = var.node_count
@@ -213,10 +232,10 @@ resource "google_container_node_pool" "region1" {
     labels = {
       owner         = var.owner
       skip_deletion = var.skip_deletion
-      cluster       = "redis-${var.region1}"
+      cluster       = "${var.cluster_prefix}-${var.region1}"
     }
 
-    tags = ["redis-gke-node", "redis-${var.region1}"]
+    tags = ["${var.cluster_prefix}-gke-node", "${var.cluster_prefix}-${var.region1}"]
 
     workload_metadata_config {
       mode = "GKE_METADATA"
@@ -227,6 +246,12 @@ resource "google_container_node_pool" "region1" {
     auto_repair  = true
     auto_upgrade = true
   }
+
+  timeouts {
+    create = var.node_pool_timeout
+    update = var.node_pool_timeout
+    delete = var.node_pool_timeout
+  }
 }
 
 # ============================================================================
@@ -234,18 +259,26 @@ resource "google_container_node_pool" "region1" {
 # ============================================================================
 
 resource "google_container_cluster" "region2" {
-  name     = "redis-${var.region2}"
+  name     = "${var.cluster_prefix}-${var.region2}"
   location = var.region2
 
-  # Use regional cluster for high availability
-  node_locations = []
+  # Regional cluster, with the zone spread stated explicitly.
+  node_locations = var.zones2
 
   network    = google_compute_network.vpc.name
   subnetwork = google_compute_subnetwork.region2.name
 
   # Start with minimal node pool (will be replaced by managed node pool)
   remove_default_node_pool = true
-  initial_node_count       = 1
+  initial_node_count       = var.initial_node_count
+  # Deliberately NOT configurable. The google provider defaults this to true
+  # since v6.0, which makes `tofu destroy` fail with:
+  #   "Cannot destroy cluster because deletion_protection is set to true"
+  # This rig is a disposable demo whose premise is one command up, one command
+  # down (docs/product/PRD.md P2/P4), so protection here would break the
+  # product. Exposing it in config.sh would only invite someone to set it true
+  # and lose the ability to tear down.
+  deletion_protection = false
 
   # IP allocation for pods and services
   ip_allocation_policy {
@@ -278,17 +311,23 @@ resource "google_container_cluster" "region2" {
 
   # Release channel
   release_channel {
-    channel = "REGULAR"
+    channel = var.release_channel
   }
 
   resource_labels = {
     owner         = var.owner
     skip_deletion = var.skip_deletion
   }
+
+  timeouts {
+    create = var.cluster_timeout
+    update = var.cluster_timeout
+    delete = var.cluster_timeout
+  }
 }
 
 resource "google_container_node_pool" "region2" {
-  name       = "redis-${var.region2}-nodes"
+  name       = "${var.cluster_prefix}-${var.region2}-nodes"
   location   = var.region2
   cluster    = google_container_cluster.region2.name
   node_count = var.node_count
@@ -310,10 +349,10 @@ resource "google_container_node_pool" "region2" {
     labels = {
       owner         = var.owner
       skip_deletion = var.skip_deletion
-      cluster       = "redis-${var.region2}"
+      cluster       = "${var.cluster_prefix}-${var.region2}"
     }
 
-    tags = ["redis-gke-node", "redis-${var.region2}"]
+    tags = ["${var.cluster_prefix}-gke-node", "${var.cluster_prefix}-${var.region2}"]
 
     workload_metadata_config {
       mode = "GKE_METADATA"
@@ -323,5 +362,11 @@ resource "google_container_node_pool" "region2" {
   management {
     auto_repair  = true
     auto_upgrade = true
+  }
+
+  timeouts {
+    create = var.node_pool_timeout
+    update = var.node_pool_timeout
+    delete = var.node_pool_timeout
   }
 }

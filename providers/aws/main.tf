@@ -9,11 +9,11 @@
 # ============================================================================
 
 terraform {
-  required_version = ">= 1.0"
+  required_version = ">= 1.6"
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0"
+      version = "~> 6.63"
     }
   }
 }
@@ -74,40 +74,40 @@ data "aws_availability_zones" "region2_azs" {
 
 resource "aws_vpc" "region1" {
   provider             = aws.region1
-  cidr_block           = "10.0.0.0/16"
+  cidr_block           = var.vpc_cidr1
   enable_dns_hostnames = true
   enable_dns_support   = true
 
   tags = {
-    Name = "redis-vpc-${var.region1}"
+    Name = "${var.cluster_prefix}-vpc-${var.region1}"
   }
 }
 
 resource "aws_subnet" "region1_public" {
   provider                = aws.region1
-  count                   = 2
+  count                   = var.az_count
   vpc_id                  = aws_vpc.region1.id
-  cidr_block              = "10.0.${count.index}.0/24"
+  cidr_block              = cidrsubnet(var.vpc_cidr1, 8, count.index)
   availability_zone       = data.aws_availability_zones.region1_azs.names[count.index]
   map_public_ip_on_launch = true
 
   tags = {
-    Name                                        = "redis-public-${var.region1}-${count.index + 1}"
-    "kubernetes.io/role/elb"                   = "1"
+    Name                                         = "${var.cluster_prefix}-public-${var.region1}-${count.index + 1}"
+    "kubernetes.io/role/elb"                     = "1"
     "kubernetes.io/cluster/redis-${var.region1}" = "shared"
   }
 }
 
 resource "aws_subnet" "region1_private" {
   provider          = aws.region1
-  count             = 2
+  count             = var.az_count
   vpc_id            = aws_vpc.region1.id
-  cidr_block        = "10.0.${count.index + 10}.0/24"
+  cidr_block        = cidrsubnet(var.vpc_cidr1, 8, count.index + 10)
   availability_zone = data.aws_availability_zones.region1_azs.names[count.index]
 
   tags = {
-    Name                                        = "redis-private-${var.region1}-${count.index + 1}"
-    "kubernetes.io/role/internal-elb"          = "1"
+    Name                                         = "${var.cluster_prefix}-private-${var.region1}-${count.index + 1}"
+    "kubernetes.io/role/internal-elb"            = "1"
     "kubernetes.io/cluster/redis-${var.region1}" = "shared"
   }
 }
@@ -117,7 +117,7 @@ resource "aws_internet_gateway" "region1" {
   vpc_id   = aws_vpc.region1.id
 
   tags = {
-    Name = "redis-igw-${var.region1}"
+    Name = "${var.cluster_prefix}-igw-${var.region1}"
   }
 }
 
@@ -131,13 +131,15 @@ resource "aws_route_table" "region1_public" {
   }
 
   tags = {
-    Name = "redis-public-rt-${var.region1}"
+    Name = "${var.cluster_prefix}-public-rt-${var.region1}"
   }
 }
 
 resource "aws_route_table_association" "region1_public" {
-  provider       = aws.region1
-  count          = 2
+  provider = aws.region1
+  # Must match the public subnet count, otherwise the extra subnets get no
+  # route to the internet gateway.
+  count          = var.az_count
   subnet_id      = aws_subnet.region1_public[count.index].id
   route_table_id = aws_route_table.region1_public.id
 }
@@ -148,40 +150,40 @@ resource "aws_route_table_association" "region1_public" {
 
 resource "aws_vpc" "region2" {
   provider             = aws.region2
-  cidr_block           = "10.1.0.0/16"
+  cidr_block           = var.vpc_cidr2
   enable_dns_hostnames = true
   enable_dns_support   = true
 
   tags = {
-    Name = "redis-vpc-${var.region2}"
+    Name = "${var.cluster_prefix}-vpc-${var.region2}"
   }
 }
 
 resource "aws_subnet" "region2_public" {
   provider                = aws.region2
-  count                   = 2
+  count                   = var.az_count
   vpc_id                  = aws_vpc.region2.id
-  cidr_block              = "10.1.${count.index}.0/24"
+  cidr_block              = cidrsubnet(var.vpc_cidr2, 8, count.index)
   availability_zone       = data.aws_availability_zones.region2_azs.names[count.index]
   map_public_ip_on_launch = true
 
   tags = {
-    Name                                        = "redis-public-${var.region2}-${count.index + 1}"
-    "kubernetes.io/role/elb"                   = "1"
+    Name                                         = "${var.cluster_prefix}-public-${var.region2}-${count.index + 1}"
+    "kubernetes.io/role/elb"                     = "1"
     "kubernetes.io/cluster/redis-${var.region2}" = "shared"
   }
 }
 
 resource "aws_subnet" "region2_private" {
   provider          = aws.region2
-  count             = 2
+  count             = var.az_count
   vpc_id            = aws_vpc.region2.id
-  cidr_block        = "10.1.${count.index + 10}.0/24"
+  cidr_block        = cidrsubnet(var.vpc_cidr2, 8, count.index + 10)
   availability_zone = data.aws_availability_zones.region2_azs.names[count.index]
 
   tags = {
-    Name                                        = "redis-private-${var.region2}-${count.index + 1}"
-    "kubernetes.io/role/internal-elb"          = "1"
+    Name                                         = "${var.cluster_prefix}-private-${var.region2}-${count.index + 1}"
+    "kubernetes.io/role/internal-elb"            = "1"
     "kubernetes.io/cluster/redis-${var.region2}" = "shared"
   }
 }
@@ -191,7 +193,7 @@ resource "aws_internet_gateway" "region2" {
   vpc_id   = aws_vpc.region2.id
 
   tags = {
-    Name = "redis-igw-${var.region2}"
+    Name = "${var.cluster_prefix}-igw-${var.region2}"
   }
 }
 
@@ -205,13 +207,13 @@ resource "aws_route_table" "region2_public" {
   }
 
   tags = {
-    Name = "redis-public-rt-${var.region2}"
+    Name = "${var.cluster_prefix}-public-rt-${var.region2}"
   }
 }
 
 resource "aws_route_table_association" "region2_public" {
   provider       = aws.region2
-  count          = 2
+  count          = var.az_count
   subnet_id      = aws_subnet.region2_public[count.index].id
   route_table_id = aws_route_table.region2_public.id
 }
@@ -221,7 +223,7 @@ resource "aws_route_table_association" "region2_public" {
 # ============================================================================
 
 resource "aws_iam_role" "eks_cluster" {
-  name = "redis-eks-cluster-role"
+  name = "${var.cluster_prefix}-eks-cluster-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -255,7 +257,7 @@ resource "aws_iam_role_policy_attachment" "eks_vpc_resource_controller" {
 # ============================================================================
 
 resource "aws_iam_role" "eks_nodes" {
-  name = "redis-eks-node-role"
+  name = "${var.cluster_prefix}-eks-node-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -296,9 +298,9 @@ resource "aws_iam_role_policy_attachment" "eks_container_registry_policy" {
 
 resource "aws_eks_cluster" "region1" {
   provider = aws.region1
-  name     = "redis-${var.region1}"
+  name     = "${var.cluster_prefix}-${var.region1}"
   role_arn = aws_iam_role.eks_cluster.arn
-  version  = "1.29"
+  version  = var.eks_version
 
   vpc_config {
     subnet_ids              = concat(aws_subnet.region1_public[*].id, aws_subnet.region1_private[*].id)
@@ -312,24 +314,24 @@ resource "aws_eks_cluster" "region1" {
   ]
 
   tags = {
-    Name = "redis-${var.region1}"
+    Name = "${var.cluster_prefix}-${var.region1}"
   }
 }
 
 resource "aws_eks_node_group" "region1" {
   provider        = aws.region1
   cluster_name    = aws_eks_cluster.region1.name
-  node_group_name = "redis-${var.region1}-nodes"
+  node_group_name = "${var.cluster_prefix}-${var.region1}-nodes"
   node_role_arn   = aws_iam_role.eks_nodes.arn
   subnet_ids      = aws_subnet.region1_private[*].id
 
   scaling_config {
-    desired_size = 3
-    max_size     = 5
-    min_size     = 2
+    desired_size = var.node_desired_size
+    max_size     = var.node_max_size
+    min_size     = var.node_min_size
   }
 
-  instance_types = ["t3.xlarge"]
+  instance_types = [var.node_instance_type]
 
   depends_on = [
     aws_iam_role_policy_attachment.eks_worker_node_policy,
@@ -338,7 +340,7 @@ resource "aws_eks_node_group" "region1" {
   ]
 
   tags = {
-    Name = "redis-${var.region1}-nodes"
+    Name = "${var.cluster_prefix}-${var.region1}-nodes"
   }
 }
 
@@ -348,9 +350,9 @@ resource "aws_eks_node_group" "region1" {
 
 resource "aws_eks_cluster" "region2" {
   provider = aws.region2
-  name     = "redis-${var.region2}"
+  name     = "${var.cluster_prefix}-${var.region2}"
   role_arn = aws_iam_role.eks_cluster.arn
-  version  = "1.29"
+  version  = var.eks_version
 
   vpc_config {
     subnet_ids              = concat(aws_subnet.region2_public[*].id, aws_subnet.region2_private[*].id)
@@ -364,24 +366,24 @@ resource "aws_eks_cluster" "region2" {
   ]
 
   tags = {
-    Name = "redis-${var.region2}"
+    Name = "${var.cluster_prefix}-${var.region2}"
   }
 }
 
 resource "aws_eks_node_group" "region2" {
   provider        = aws.region2
   cluster_name    = aws_eks_cluster.region2.name
-  node_group_name = "redis-${var.region2}-nodes"
+  node_group_name = "${var.cluster_prefix}-${var.region2}-nodes"
   node_role_arn   = aws_iam_role.eks_nodes.arn
   subnet_ids      = aws_subnet.region2_private[*].id
 
   scaling_config {
-    desired_size = 3
-    max_size     = 5
-    min_size     = 2
+    desired_size = var.node_desired_size
+    max_size     = var.node_max_size
+    min_size     = var.node_min_size
   }
 
-  instance_types = ["t3.xlarge"]
+  instance_types = [var.node_instance_type]
 
   depends_on = [
     aws_iam_role_policy_attachment.eks_worker_node_policy,
@@ -390,6 +392,6 @@ resource "aws_eks_node_group" "region2" {
   ]
 
   tags = {
-    Name = "redis-${var.region2}-nodes"
+    Name = "${var.cluster_prefix}-${var.region2}-nodes"
   }
 }

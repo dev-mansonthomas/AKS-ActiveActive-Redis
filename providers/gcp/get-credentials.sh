@@ -1,37 +1,38 @@
 #!/usr/bin/env bash
 # ============================================================================
-# GCP GKE - Get Kubernetes Credentials
+# GCP GKE — load kubeconfig contexts
 # ============================================================================
-# This script retrieves kubeconfig credentials for both GKE clusters
+# Contract: on exit, kubectl has contexts named exactly $CLUSTER1 and $CLUSTER2
+# (as derived in config.sh). Steps 02-05 rely on those names.
+# Run from anywhere. HOST ONLY — needs gcloud auth.
 # ============================================================================
 
-set -e
+set -uo pipefail
 
-# Load configuration
-source ../../config.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/common/lib.sh"
 
-echo "🔑 Configuring kubectl credentials for GCP GKE clusters..."
+re_load_config
 
-# Get credentials for Region 1
-echo "📍 Getting credentials for cluster: redis-${GCP_REGION1}"
-gcloud container clusters get-credentials "redis-${GCP_REGION1}" \
-  --region "${GCP_REGION1}" \
-  --project "${GCP_PROJECT_ID}"
+re_log "🔑 Configuring kubectl for GKE (project $GCP_PROJECT_ID)"
 
-# Rename context for consistency
-kubectl config rename-context "gke_${GCP_PROJECT_ID}_${GCP_REGION1}_redis-${GCP_REGION1}" "redis-${GCP_REGION1}" 2>/dev/null || true
+for pair in "$CLUSTER1:$GCP_REGION1" "$CLUSTER2:$GCP_REGION2"; do
+  cluster="${pair%%:*}"
+  region="${pair##*:}"
 
-# Get credentials for Region 2
-echo "📍 Getting credentials for cluster: redis-${GCP_REGION2}"
-gcloud container clusters get-credentials "redis-${GCP_REGION2}" \
-  --region "${GCP_REGION2}" \
-  --project "${GCP_PROJECT_ID}"
+  re_log "📍 $cluster ($region)"
+  re_run gcloud container clusters get-credentials "$cluster" \
+    --region "$region" --project "$GCP_PROJECT_ID" \
+    || re_die "failed to get credentials for $cluster in $region"
 
-# Rename context for consistency
-kubectl config rename-context "gke_${GCP_PROJECT_ID}_${GCP_REGION2}_redis-${GCP_REGION2}" "redis-${GCP_REGION2}" 2>/dev/null || true
+  # gcloud names the context gke_<project>_<region>_<cluster>; normalise it.
+  gke_ctx="gke_${GCP_PROJECT_ID}_${region}_${cluster}"
+  if kubectl config get-contexts -o name 2>/dev/null | grep -qx "$gke_ctx"; then
+    kubectl config rename-context "$gke_ctx" "$cluster" >/dev/null 2>&1 || true
+  fi
 
-echo "✅ Kubectl credentials configured successfully!"
-echo ""
-echo "Test with:"
-echo "  kubectl get nodes --context=redis-${GCP_REGION1}"
-echo "  kubectl get nodes --context=redis-${GCP_REGION2}"
+  kubectl config get-contexts -o name 2>/dev/null | grep -qx "$cluster" \
+    || re_die "context '$cluster' not present after get-credentials"
+  re_log "✅ context $cluster ready"
+done
+
+re_log "✅ kubectl configured for $CLUSTER1 and $CLUSTER2"

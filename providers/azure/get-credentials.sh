@@ -1,41 +1,30 @@
 #!/usr/bin/env bash
 # ============================================================================
-# Azure AKS - Get Kubernetes Credentials
+# Azure AKS — load kubeconfig contexts
 # ============================================================================
-# This script retrieves kubectl credentials for Azure AKS clusters
-# Usage: ./get-credentials.sh
+# Contract: on exit, kubectl has contexts named exactly $CLUSTER1 and $CLUSTER2
+# (as derived in config.sh). Steps 02-05 rely on those names.
+# Run from anywhere. HOST ONLY — needs az auth.
 # ============================================================================
 
-set -e
+set -uo pipefail
 
-# Load configuration from root config.sh
-source ../../config.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/common/lib.sh"
 
-echo "🔑 Getting AKS credentials for Azure clusters..."
+re_load_config
 
-# Get credentials for cluster 1
-if [ -n "$CLUSTER1" ]; then
-    echo "📍 Cluster 1: $CLUSTER1 in region $AZURE_REGION1"
-    az aks get-credentials \
-        -g "$CLUSTER_RESOURCE_GROUP" \
-        --name "$CLUSTER1" \
-        --context "$CLUSTER1" \
-        --overwrite-existing
-    echo "✅ Credentials for $CLUSTER1 configured"
-fi
+re_log "🔑 Configuring kubectl for AKS (resource group $AZURE_CLUSTER_RESOURCE_GROUP)"
 
-# Get credentials for cluster 2
-if [ -n "$CLUSTER2" ]; then
-    echo "📍 Cluster 2: $CLUSTER2 in region $AZURE_REGION2"
-    az aks get-credentials \
-        -g "$CLUSTER_RESOURCE_GROUP" \
-        --name "$CLUSTER2" \
-        --context "$CLUSTER2" \
-        --overwrite-existing
-    echo "✅ Credentials for $CLUSTER2 configured"
-fi
+for cluster in "$CLUSTER1" "$CLUSTER2"; do
+  re_log "📍 $cluster"
+  re_run az aks get-credentials \
+    --resource-group "$AZURE_CLUSTER_RESOURCE_GROUP" \
+    --name "$cluster" --context "$cluster" --overwrite-existing \
+    || re_die "failed to get credentials for $cluster"
 
-echo ""
-echo "🎉 Azure AKS credentials configured successfully!"
-echo "Available contexts:"
-kubectl config get-contexts | grep redis
+  kubectl config get-contexts -o name 2>/dev/null | grep -qx "$cluster" \
+    || re_die "context '$cluster' not present after get-credentials"
+  re_log "✅ context $cluster ready"
+done
+
+re_log "✅ kubectl configured for $CLUSTER1 and $CLUSTER2"
