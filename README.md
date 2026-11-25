@@ -276,21 +276,17 @@ In case of the license, it needs to be registered on both nodes (this can also b
 
 ## Get credentials
 
-check the output of `./create-all.sh` or run `./05-get-cluster-info.sh` to get username & password
+check the output of `./create-all.sh` or run `./scripts/05-get-cluster-info.sh` to get username & password
 
 ## Create a secure tunnel to the Redis Enterprise WebUI
 
 ```shell
-cd /redis-enterprise-testing/
-./webui-cluster1.sh
+./scripts/webui.sh      # both clusters: https://localhost:8443 (cluster 1) and :8444 (cluster 2)
+./scripts/webui.sh 1    # cluster 1 only
+./scripts/webui.sh 2    # cluster 2 only
 ```
 
-or
-
-```shell
-cd /redis-enterprise-testing/
-./webui-cluster1.sh
-```
+Works from any directory. Ctrl-C closes the tunnels.
 
 This will create a secure connection, tunnel communication between your browser and Redis Enterprise Web UI.
 It will open your browser to https://localhost:8443 or https://localhost:8444
@@ -309,7 +305,7 @@ To add a license :
 
 # Connect Redis Insight to each cluster
 
-Use the connection string printed at the end of the creation of the cluster (or use `./05-get-cluster-info.sh` to get it again)
+Use the connection string printed at the end of the creation of the cluster (or use `./scripts/05-get-cluster-info.sh` to get it again)
 
 * Give each a name that include the region
 * paste the connection string 
@@ -374,7 +370,7 @@ Arguments :
 
 ```shell
 cd ./redis-enterprise-testing/
-./check-redis-enterprise-on-azure.sh
+./check-redis-enterprise.sh
 ```
 
 Would collect logs and k8s resource statuses from various components of the setup in `./logs` folder.
