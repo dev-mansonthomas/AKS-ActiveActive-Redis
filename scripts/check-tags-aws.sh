@@ -39,7 +39,7 @@ echo ""
 # Check VPC in region 1
 vpc1_id=$(aws ec2 describe-vpcs \
     --region "$AWS_REGION1" \
-    --filters "Name=tag:Name,Values=redis-vpc-${AWS_REGION1}" \
+    --filters "Name=tag:Name,Values=${CLUSTER_PREFIX}-vpc-${AWS_REGION1}" \
     --query 'Vpcs[0].VpcId' --output text 2>/dev/null)
 
 if [ -n "$vpc1_id" ] && [ "$vpc1_id" != "None" ]; then
@@ -53,7 +53,7 @@ fi
 # Check VPC in region 2
 vpc2_id=$(aws ec2 describe-vpcs \
     --region "$AWS_REGION2" \
-    --filters "Name=tag:Name,Values=redis-vpc-${AWS_REGION2}" \
+    --filters "Name=tag:Name,Values=${CLUSTER_PREFIX}-vpc-${AWS_REGION2}" \
     --query 'Vpcs[0].VpcId' --output text 2>/dev/null)
 
 if [ -n "$vpc2_id" ] && [ "$vpc2_id" != "None" ]; then
@@ -70,20 +70,20 @@ echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━�
 echo ""
 
 # Check EKS cluster IAM role
-cluster_role_arn=$(aws iam get-role --role-name redis-eks-cluster-role --query 'Role.Arn' --output text 2>/dev/null)
+cluster_role_arn=$(aws iam get-role --role-name "${CLUSTER_PREFIX}-eks-cluster-role" --query 'Role.Arn' --output text 2>/dev/null)
 if [ -n "$cluster_role_arn" ] && [ "$cluster_role_arn" != "None" ]; then
     check_tags_aws "$cluster_role_arn" "IAM Role (EKS Cluster)" "$AWS_REGION1"
 else
-    echo -e "${YELLOW}⚠ IAM role 'redis-eks-cluster-role' not found (may not be created yet)${NC}"
+    echo -e "${YELLOW}⚠ IAM role '${CLUSTER_PREFIX}-eks-cluster-role' not found (may not be created yet)${NC}"
     echo ""
 fi
 
 # Check EKS node IAM role
-node_role_arn=$(aws iam get-role --role-name redis-eks-node-role --query 'Role.Arn' --output text 2>/dev/null)
+node_role_arn=$(aws iam get-role --role-name "${CLUSTER_PREFIX}-eks-node-role" --query 'Role.Arn' --output text 2>/dev/null)
 if [ -n "$node_role_arn" ] && [ "$node_role_arn" != "None" ]; then
     check_tags_aws "$node_role_arn" "IAM Role (EKS Nodes)" "$AWS_REGION1"
 else
-    echo -e "${YELLOW}⚠ IAM role 'redis-eks-node-role' not found (may not be created yet)${NC}"
+    echo -e "${YELLOW}⚠ IAM role '${CLUSTER_PREFIX}-eks-node-role' not found (may not be created yet)${NC}"
     echo ""
 fi
 

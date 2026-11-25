@@ -7,6 +7,10 @@ __pycache__/
 logs/*
 !logs/.gitkeep
 
+# Deployment / run logs and collected diagnostics (see common/lib.sh, scripts/get-logs.sh)
+debug/*
+!debug/.gitkeep
+
 # Terraform
 .terraform/
 *.tfstate

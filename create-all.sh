@@ -1,10 +1,3 @@
 #!/usr/bin/env bash
-# ============================================================================
-# Create All - Root Wrapper Script
-# ============================================================================
-# This is a convenience wrapper that calls the script in scripts/
-# ============================================================================
-
-cd scripts
-./create-all.sh
-cd ..
+# Root wrapper -> scripts/create-all.sh  (works from any directory)
+exec bash "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/scripts/create-all.sh" "$@"

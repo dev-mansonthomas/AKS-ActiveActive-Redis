@@ -1,64 +1,71 @@
 #!/usr/bin/env bash
 # ============================================================================
-# Create All - Multi-Cloud Redis Enterprise Active/Active Deployment
+# create-all.sh — the ONE command that builds the whole demo
 # ============================================================================
-# This script orchestrates the full deployment process
-# Supports: Azure (AKS), AWS (EKS), GCP (GKE)
+# Runs steps 01→04, times each, then prints the connection details (05).
+# Works from any directory. Everything is logged to debug/.
+#
+# Usage:  ./create-all.sh            (root wrapper)  or  ./scripts/create-all.sh
+# Log:    debug/create-all-<timestamp>.log
+#
+# HOST ONLY — needs cloud credentials. Never run inside the VM.
 # ============================================================================
 
-set -e
+set -uo pipefail
 
-# Load configuration
-source ../config.sh
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/../common/lib.sh"
 
-echo "🚀 Starting Redis Enterprise Active/Active deployment on $CLOUD_PROVIDER"
-echo "========================================================================="
+re_load_config
+re_log_init "create-all"
 
-declare -A durations  # Stocke durée par script en secondes
-declare -a scripts    # Stocke l'ordre d'exécution
+re_log "🚀 Redis Enterprise Active/Active on $CLOUD_PROVIDER"
+re_log "   $CLUSTER1 ($REGION1)  ⇄  $CLUSTER2 ($REGION2)"
+re_log "   DNS zone: $DNS_ZONE   DB: $AA_DB_NAME"
+re_log "═══════════════════════════════════════════════════════════"
 
-measure_time() {
-  local script="$1"
-  local start_time=$(date +%s)
+STEPS="01-create-cluster.sh 02-setup-haproxy.sh 03-setup-rerc.sh 04-create-active-active-db.sh"
+# Parallel indexed arrays. Associative arrays need bash 4, and macOS still
+# ships bash 3.2 as /bin/bash, where that syntax is a parse error.
+step_names=()
+step_secs=()
+overall_start=$SECONDS
 
-  echo ""
-  echo "🚀 Starting $script..."
-  echo "========================================================================="
-  ./"$script"
-
-  local end_time=$(date +%s)
-  local duration=$((end_time - start_time))  # Garde en secondes
-
-  durations["$script"]=$duration
-  scripts+=("$script")
-}
-
-
-# Exécution des scripts
-measure_time "01-create-cluster.sh"
-measure_time "02-setup-haproxy.sh"
-measure_time "03-setup-rerc.sh"
-measure_time "04-create-active-active-db.sh"
-
-# Résumé propre
-echo ""
-echo "========================================="
-echo "⏱️ Execution Summary:"
-total_duration=0
-for script in "${scripts[@]}"; do
-  duration=${durations[$script]}
-  minutes=$((duration / 60))
-  seconds=$((duration % 60))
-  printf "• %-30s : %2d min %02d sec\n" "$script" "$minutes" "$seconds"
-  total_duration=$((total_duration + duration))
+for step in $STEPS; do
+  re_log ""
+  re_log "▶▶ $step"
+  start=$SECONDS
+  if ! bash "$SCRIPT_DIR/$step"; then
+    step_names+=("$step")
+    step_secs+=("$((SECONDS - start))")
+    re_warn "$step FAILED after $((SECONDS - start))s — aborting."
+    re_warn "Diagnostics: ./scripts/get-logs.sh"
+    exit 1
+  fi
+  step_names+=("$step")
+  step_secs+=("$((SECONDS - start))")
 done
-echo "-----------------------------------------"
-total_minutes=$((total_duration / 60))
-total_seconds=$((total_duration % 60))
-printf "🔴 Total execution time         : %2d min %02d sec\n" "$total_minutes" "$total_seconds"
-echo "========================================="
 
-echo "Waiting 5 seconds - otherwise some info are missing"
-sleep 5
+re_log ""
+re_log "═══════════════════════════════════════════════════════════"
+re_log "⏱️  Execution summary"
+i=0
+while [ "$i" -lt "${#step_names[@]}" ]; do
+  d=${step_secs[$i]}
+  re_log "$(printf '   • %-32s %2dm %02ds' "${step_names[$i]}" $((d / 60)) $((d % 60)))"
+  i=$((i + 1))
+done
+total=$((SECONDS - overall_start))
+re_log "$(printf '   🔴 %-32s %2dm %02ds' "TOTAL" $((total / 60)) $((total % 60)))"
+re_log "═══════════════════════════════════════════════════════════"
 
-./05-get-cluster-info.sh
+# Give the operator a moment to publish ingress/endpoint data before we read it.
+re_log "Waiting for endpoint data to settle..."
+sleep 10
+
+bash "$SCRIPT_DIR/05-get-cluster-info.sh"
+
+re_log ""
+re_log "✅ Demo ready. Tear down with: ./delete-all-resources.sh"
+re_log "   Diagnostics:  ./scripts/get-logs.sh"
+re_log "   This log:     ${RE_LOG_FILE#"$REPO_ROOT"/}"

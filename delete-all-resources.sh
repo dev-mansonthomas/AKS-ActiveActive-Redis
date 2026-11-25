@@ -1,10 +1,3 @@
 #!/usr/bin/env bash
-# ============================================================================
-# Delete All Resources - Root Wrapper Script
-# ============================================================================
-# This is a convenience wrapper that calls the script in scripts/
-# ============================================================================
-
-cd scripts
-./delete-all-resources.sh
-cd ..
+# Root wrapper -> scripts/delete-all-resources.sh  (works from any directory)
+exec bash "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/scripts/delete-all-resources.sh" "$@"

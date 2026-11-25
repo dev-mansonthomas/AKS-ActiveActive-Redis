@@ -10,10 +10,34 @@
 # Supports: Azure (AKS), AWS (EKS), GCP (GKE)
 # ============================================================================
 
-set -e
+set -uo pipefail
 
-# Load configuration
-source ./config.sh
+_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common/lib.sh"
+if [ ! -r "$_LIB" ]; then
+  echo "FATAL: cannot read $_LIB" >&2
+  exit 1
+fi
+# shellcheck source=common/lib.sh
+. "$_LIB" || { echo "FATAL: failed to load $_LIB" >&2; exit 1; }
+
+# --expect-empty : after a teardown, finding NOTHING is the success case.
+EXPECT_EMPTY=0
+case "${1:-}" in
+  --expect-empty) EXPECT_EMPTY=1 ;;
+  -h|--help)
+    echo "Usage: ./check-tags.sh [--expect-empty]"
+    echo "  (no flag)        audit mode: every resource must carry owner + skip_deletion"
+    echo "  --expect-empty   post-teardown mode: success means no resource was found"
+    exit 0 ;;
+  "") ;;
+  *) echo "unknown option: $1 (try --help)" >&2; exit 2 ;;
+esac
+
+re_load_config
+re_log_init "check-tags"
+
+# Use the account config.sh names, not whatever happens to be globally active.
+re_cloud_select_account
 
 # Colors for output
 RED='\033[0;31m'
@@ -156,11 +180,42 @@ echo -e "${GREEN}Passed: $PASSED_CHECKS${NC}"
 echo -e "${RED}Failed: $FAILED_CHECKS${NC}"
 echo ""
 
-if [ $FAILED_CHECKS -eq 0 ] && [ $TOTAL_CHECKS -gt 0 ]; then
-    echo -e "${GREEN}✓ All critical resources are properly tagged!${NC}"
+# Exit semantics depend on why you are running this.
+#
+# Audit mode (default): resources are expected to exist and be tagged, so
+#   finding none is suspicious — it usually means the wrong project, region or
+#   CLUSTER_PREFIX, not a clean account.
+# --expect-empty (after teardown): finding none is exactly what we want, and
+#   finding anything means the teardown leaked billable resources.
+if [ "$EXPECT_EMPTY" -eq 1 ]; then
+  if [ "$TOTAL_CHECKS" -eq 0 ]; then
+    re_log "✅ nothing found — teardown left no billable resource behind"
     exit 0
-else
-    echo -e "${RED}✗ Some resources are missing tags or have incorrect values${NC}"
-    exit 1
+  fi
+  re_warn "$TOTAL_CHECKS resource(s) still exist after teardown:"
+  re_warn "   they are billable. Re-run: ./${CLOUD_PROVIDER}-deploy.sh --destroy"
+  exit 1
 fi
+
+if [ "$TOTAL_CHECKS" -eq 0 ]; then
+  re_warn "no resource found at all."
+  re_warn "   Either nothing is deployed, or config.sh points elsewhere:"
+  re_warn "     project/subscription : $CLUSTER_RESOURCE_GROUP"
+  re_warn "     regions              : $REGION1, $REGION2"
+  re_warn "     CLUSTER_PREFIX       : $CLUSTER_PREFIX"
+  re_warn "   After a teardown this is expected — use --expect-empty then."
+  exit 1
+fi
+
+if [ "$FAILED_CHECKS" -eq 0 ]; then
+  re_log "✅ $TOTAL_CHECKS resource(s) attributable to you"
+  if [ "$CLOUD_PROVIDER" = "gcp" ]; then
+    re_log "   (clusters verified by LABEL; network resources and node pools by"
+    re_log "    NAME prefix only — GCP does not support labels on those. ADR 0006)"
+  fi
+  exit 0
+fi
+re_warn "$FAILED_CHECKS of $TOTAL_CHECKS resource(s) are not attributable:"
+re_warn "   missing/wrong labels, or a name outside the '$CLUSTER_PREFIX' prefix"
+exit 1
 

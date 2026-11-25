@@ -1,13 +1,13 @@
 apiVersion: app.redislabs.com/v1alpha1
 kind: RedisEnterpriseActiveActiveDatabase
 metadata:
-  name: AA_DB_NAME
+  name: {{AA_DB_NAME}}
 spec:
   globalConfigurations:
-    #databaseSecretName: AA_DB_NAME
-    memorySize: 200MB
-    shardCount: 1
+    databaseSecretName: {{AA_DB_SECRET}}
+    memorySize: {{AA_DB_MEMORY}}
+    shardCount: {{AA_DB_SHARDS}}
     replication: true
   participatingClusters:
-      - name: CLUSTER1
-      - name: CLUSTER2
+      - name: {{REC_NAME_1}}
+      - name: {{REC_NAME_2}}

@@ -1,10 +1,10 @@
 apiVersion: app.redislabs.com/v1alpha1
 kind: RedisEnterpriseRemoteCluster
 metadata:
-  name: CLUSTER
+  name: {{REC_NAME}}
 spec:
-  recName: rec-CLUSTER
-  recNamespace: NAMESPACE
-  apiFqdnUrl: api.CLUSTER.DNS_ZONE
-  dbFqdnSuffix: -db.CLUSTER.DNS_ZONE
-  secretName: redis-enterprise-CLUSTER
+  recName: {{REC_NAME}}
+  recNamespace: {{NAMESPACE}}
+  apiFqdnUrl: api.{{REC_NAME}}.{{DNS_ZONE}}
+  dbFqdnSuffix: -db.{{REC_NAME}}.{{DNS_ZONE}}
+  secretName: redis-enterprise-{{REC_NAME}}

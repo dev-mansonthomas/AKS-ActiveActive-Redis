@@ -1,84 +1,116 @@
 #!/usr/bin/env bash
 # ============================================================================
-# Delete All Resources - Multi-Cloud Wrapper
+# Delete all resources (multi-cloud)
 # ============================================================================
-# This script detects the cloud provider and deletes all resources
-# Supports: Azure (AKS), AWS (EKS), GCP (GKE)
+# Removes K8s workloads, DNS records and the cloud infrastructure.
+# All Terraform input comes from config.sh via re_export_tf_vars — which is
+# why GCP teardown now works (project_id used to be unset, so `tofu destroy`
+# could not run and resources leaked).
+#
+# Run from anywhere:  ./scripts/delete-all-resources.sh
+# Log:                debug/delete-all-resources-<timestamp>.log
+#
+# HOST ONLY — needs cloud credentials. Never run inside the VM.
 # ============================================================================
 
-set -e
+set -uo pipefail   # NOT -e: teardown must continue past individual failures.
 
-# Start total timer
-total_start=$(date +%s)
+_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../common/lib.sh"
+if [ ! -r "$_LIB" ]; then
+  echo "FATAL: cannot read $_LIB" >&2
+  exit 1
+fi
+# shellcheck source=../common/lib.sh
+. "$_LIB" || { echo "FATAL: failed to load $_LIB" >&2; exit 1; }
 
-# Load configuration
-source ../config.sh
+re_load_config
+re_log_init "delete-all-resources"
 
-echo "🗑️  Deleting all resources on $CLOUD_PROVIDER..."
-echo "🧹 Cleaning up Kubernetes resources..."
-for CLUSTER in $CLUSTER1 $CLUSTER2; do
-  echo "⛔ Deleting namespace $NS in cluster $CLUSTER..."
-  kubectl delete ns $NS --context=$CLUSTER 2>/dev/null || true
+total_start=$SECONDS
+FAILED=0
 
-  echo "⛔ Deleting ingress-controller namespace in cluster $CLUSTER..."
-  kubectl delete ns ingress-controller --context=$CLUSTER 2>/dev/null || true
-
-  echo "⛔ Forcing Helm uninstall of haproxy-ingress (if still tracked) in $CLUSTER..."
-  helm uninstall haproxy-ingress -n ingress-controller --kube-context=$CLUSTER 2>/dev/null || true
+re_log "🗑️  Deleting all resources on $CLOUD_PROVIDER"
+re_log "🧹 Cleaning up Kubernetes resources (ordered, bounded — see re_k8s_teardown)"
+for CLUSTER in "$CLUSTER1" "$CLUSTER2"; do
+  re_k8s_teardown "$CLUSTER" || FAILED=$((FAILED + 1))
 done
 
-echo "🌐 Cleaning up DNS entries..."
+re_log "🌐 Cleaning up DNS records"
+# CURRENT names AND LEGACY ones. Before the 2026-09-07 rename the wildcard was
+# *.<cloud cluster name>; now it is *.<REC name>. Covering both is what stops
+# a rename from orphaning records forever — the teardown would otherwise no
+# longer know the old names, and nothing else would ever remove them.
+# A missing record is not an error here, hence `|| true`.
+DNS_TARGETS="$REC_NAME1 $REC_NAME2 $CLUSTER1 $CLUSTER2"
 case $CLOUD_PROVIDER in
   azure)
-    az network dns record-set a delete -g $DNS_RESOURCE_GROUP -z $DNS_ZONE -n "*.$CLUSTER1" -y 2>/dev/null || true
-    az network dns record-set a delete -g $DNS_RESOURCE_GROUP -z $DNS_ZONE -n "*.$CLUSTER2" -y 2>/dev/null || true
+    for C in $DNS_TARGETS; do
+      re_run az network dns record-set a delete \
+        -g "$DNS_RESOURCE_GROUP" -z "$DNS_ZONE" -n "*.$C" -y || true
+    done
     ;;
   aws)
-    # AWS Route53 cleanup would go here
-    echo "⚠️  AWS DNS cleanup not yet implemented"
+    # shellcheck source=/dev/null
+    . "$REPO_ROOT/common/dns-aws.sh"
+    for C in $DNS_TARGETS; do
+      re_run delete_dns_record "$DNS_ZONE" "*.$C" || true
+    done
     ;;
   gcp)
-    # GCP Cloud DNS cleanup would go here
-    echo "⚠️  GCP DNS cleanup not yet implemented"
+    # shellcheck source=/dev/null
+    . "$REPO_ROOT/common/dns-gcp.sh"
+    for C in $DNS_TARGETS; do
+      re_run delete_dns_record "$DNS_ZONE" "$GCP_PROJECT_ID" "*.$C" || true
+    done
     ;;
 esac
 
-echo "🔥 Destroying infrastructure with Terraform..."
-cd ../providers/$CLOUD_PROVIDER
+# GKE's LoadBalancer firewall rules survive the cluster and would block the
+# VPC deletion. Clear them up front rather than discovering it 9 minutes in.
+re_gcp_clean_orphan_firewalls
 
-case $CLOUD_PROVIDER in
-  azure)
-    TF_VAR_subscription_id=$(az account show --query id -o tsv)
-    TF_VAR_azure_rg=$CLUSTER_RESOURCE_GROUP
-    TF_VAR_owner=$owner
-    TF_VAR_skip_deletion=$skip_deletion
-    export TF_VAR_subscription_id TF_VAR_azure_rg TF_VAR_owner TF_VAR_skip_deletion
-    ;;
-  aws)
-    export AWS_DEFAULT_REGION=$AWS_REGION1
-    TF_VAR_aws_account_id=$(aws sts get-caller-identity --query Account --output text)
-    TF_VAR_owner=$owner
-    TF_VAR_skip_deletion=$skip_deletion
-    export TF_VAR_aws_account_id TF_VAR_owner TF_VAR_skip_deletion
-    ;;
-  gcp)
-    gcloud config set project $GCP_PROJECT_ID
-    TF_VAR_owner=$owner
-    TF_VAR_skip_deletion=$skip_deletion
-    export TF_VAR_owner TF_VAR_skip_deletion
-    ;;
-esac
+re_log "🔥 Destroying infrastructure with OpenTofu"
 
-tofu destroy -auto-approve
+re_export_tf_vars
+re_dump_tf_vars
 
-cd ../../scripts
+cd "$REPO_ROOT/providers/$CLOUD_PROVIDER" || re_die "no provider directory for $CLOUD_PROVIDER"
 
-echo "Cleanup complete."
+re_tofu_init >/dev/null 2>&1 || re_warn "tofu init failed; destroy may not work"
+re_tofu_destroy || FAILED=$((FAILED + 1))
 
-# End total timer
-total_end=$(date +%s)
-total_duration=$(( (total_end - total_start) / 60 ))
 
-echo "========================================="
-echo "⏱️ Total execution time: ${total_duration} minutes"
-echo "========================================="
+# CSI-provisioned disks are named pvc-<uuid> and are NOT in Terraform state.
+# If a PVC was not deleted before its cluster, the disk survives and bills.
+if [ "$CLOUD_PROVIDER" = "gcp" ]; then
+  re_log "🔎 Checking for orphaned persistent disks"
+  orphans=$(gcloud compute disks list --project "$GCP_PROJECT_ID" \
+    --filter="name~^pvc- AND users.len()=0 AND (zone~$GCP_REGION1 OR zone~$GCP_REGION2)" \
+    --format='value(name,zone,sizeGb)' 2>/dev/null || true)
+  if [ -n "$orphans" ]; then
+    re_warn "orphaned disks still billing (Terraform does not know them):"
+    printf '%s\n' "$orphans" | sed 's/^/       /' >&2
+    re_warn "   Re-running --destroy will NOT remove them: Terraform has no"
+    re_warn "   record of them. Delete each one explicitly:"
+    printf '%s\n' "$orphans" | while read -r d z _; do
+      [ -n "$d" ] || continue
+      re_warn "     gcloud compute disks delete $d --zone=${z##*/} --project $GCP_PROJECT_ID --quiet"
+    done
+    re_warn "   (not deleted automatically: on a shared project another"
+    re_warn "    operator's detached pvc-* disk would match the same filter)"
+    FAILED=$((FAILED + 1))
+  else
+    re_log "  ✅ no orphaned pvc-* disks"
+  fi
+fi
+
+elapsed=$((SECONDS - total_start))
+re_log "════════════════════════════════════════"
+re_log "⏱️  Teardown finished in $((elapsed / 60))m $((elapsed % 60))s"
+if [ "$FAILED" -gt 0 ]; then
+  re_warn "$FAILED step(s) failed — resources may remain."
+  re_warn "Verify with:  ./check-tags.sh   (expect 0 resources found)"
+  exit 1
+fi
+
+re_log "✅ Teardown complete. Verify with: ./check-tags.sh --expect-empty"
