@@ -265,7 +265,7 @@ replaces. See `docs/TODO.md` for the consolidation plan.
 - **`config.sh` is the single source of truth — enforced, not aspirational.** Every value
   Terraform consumes lives there and reaches it as `TF_VAR_*` via
   `common/lib.sh::re_export_tf_vars`. There are **no `.tfvars` files and no defaults in any
-  `providers/*/variables.tf`** (azure 12, aws 12, gcp 19 variables, 0 defaults): a missing value
+  `providers/*/variables.tf`** (azure 13, aws 13, gcp 22 variables, 0 defaults): a missing value
   fails the plan loudly instead of silently substituting a different one. Verify with
   `./scripts/verify-config.sh all`. Copy the file from `config.example.sh`.
 - **Source `common/lib.sh` first in every new script**, then `re_load_config`. It gives you

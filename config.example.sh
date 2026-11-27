@@ -191,8 +191,6 @@ GCP_ZONES2=europe-west1-b,europe-west1-c,europe-west1-d
 GCP_NODE_COUNT=1
 GCP_NODE_MIN_COUNT=1
 GCP_NODE_MAX_COUNT=2
-# Nodes created with the cluster before the managed node pool is attached.
-GCP_INITIAL_NODE_COUNT=1
 # GKE release channel: RAPID | REGULAR | STABLE. A channel, not a version pin —
 # GKE tracks a recent Kubernetes release automatically.
 GCP_RELEASE_CHANNEL=REGULAR
@@ -210,8 +208,7 @@ GCP_SERVICES_CIDR2=10.1.32.0/20
 # A 40-minute cap therefore aborts runs that GCP would have completed — and the
 # error Terraform reports is the last failed poll, which looks like a DNS
 # problem and hides the real cause. Give it real headroom.
-GCP_CLUSTER_TIMEOUT=60m
-GCP_NODE_POOL_TIMEOUT=90m
+GCP_CLUSTER_TIMEOUT=90m   # the node pool is now created INSIDE the cluster operation: it needs the old pool headroom too
 
 # Ports opened for Redis Enterprise. Comma-separated, Terraform list syntax.
 #   8443  = Redis Enterprise UI/API via ingress
@@ -224,6 +221,25 @@ GCP_NODE_POOL_TIMEOUT=90m
 GCP_DNS_ZONE=gcp.example.com
 
 GCP_REDIS_PORTS='["8443","10000-19999"]'
+
+# Service account the GKE NODES run as: dedicated and least-privilege, NOT the
+# Compute Engine default SA (project Editor). It must exist before the deploy;
+# the commands to create it are in docs/gcp-iam.md. Format:
+#   gke-nodes@<GCP_PROJECT_ID>.iam.gserviceaccount.com
+GCP_NODE_SERVICE_ACCOUNT=gke-nodes@your-project-id.iam.gserviceaccount.com
+
+# Project roles the DEPLOY identity (GCP_ACCOUNT) needs. Granted by ./gcp-setup.sh
+# (run once, as an IAM admin, before ./gcp-deploy.sh). Space-separated. Why each
+# one: docs/gcp-iam.md §3. Never add IAM-admin / owner / editor roles here.
+GCP_DEPLOYER_ROLES="roles/compute.admin roles/container.admin roles/dns.admin roles/cloudasset.viewer"
+
+# APIs ./gcp-setup.sh enables on the project (idempotent). cloudasset serves the
+# label-wide audit in ./check-tags.sh; the others are needed to deploy.
+GCP_REQUIRED_APIS="container.googleapis.com compute.googleapis.com dns.googleapis.com cloudasset.googleapis.com"
+
+# Who runs ./gcp-setup.sh (an account WITH IAM rights, never GCP_ACCOUNT).
+# Leave empty to use the currently active gcloud account.
+GCP_ADMIN_ACCOUNT=
 
 # ── Terraform concurrency ───────────────────────────────────────────────────
 # Terraform runs 10 operations in parallel by default. Each keeps its own TLS

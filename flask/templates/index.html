@@ -1,24 +1,67 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <title>Redis Availability dashboard</title>
+    <title>Redis Active-Active chaos console</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-4bw+/aepP/YC94hEpVNVgiZdgIC5+VKNBQNGCHeKRQN+PtmoHDEXuppvnDJzQIu9" crossorigin="anonymous">
-    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.4/jquery.min.js"></script>
     <style>
-        .b-example-divider {
-          width: 100%;
-          height: 0.5rem;
-          background-color: rgba(0, 0, 0, .1);
-          border: solid rgba(0, 0, 0, .15);
-          border-width: 1px 0;
-          box-shadow: inset 0 .5em 1.5em rgba(0, 0, 0, .1), inset 0 .125em .5em rgba(0, 0, 0, .15);
-        }
+        :root { --redis-hyper: #FF4438; --redis-text: #091A23; --redis-text-2: #163341; }
+        body { font-size: 1.15rem; color: var(--redis-text); }
+        .chaos-header { display: flex; align-items: center; gap: 1rem; padding: 1rem 0 .75rem; margin-bottom: 1rem; border-bottom: 3px solid var(--redis-hyper); }
+        .chaos-title { font-size: 1.5rem; font-weight: 700; color: var(--redis-text-2); }
+        .chaos-banner { border-left: 0.6rem solid #6c757d; background: #f5f6f8; border-radius: .5rem; padding: .45rem 1.1rem; margin-bottom: .75rem; font-size: .88rem; line-height: 1.35; }
+        .chaos-banner.chaos-ready   { border-color: #0d6efd; background: #eef4ff; }
+        .chaos-banner.chaos-running { border-color: #fd7e14; background: #fff4e8; }
+        .chaos-banner.chaos-verifying { border-color: #198754; background: #eaf6ef; }
+        .chaos-banner.result-pass   { border-color: #198754; background: #eaf6ef; }
+        .chaos-banner.result-fail,
+        .chaos-banner.result-aborted,
+        .chaos-banner.chaos-stale   { border-color: #dc3545; background: #fdeeee; }
+        .chaos-headline { margin: 0; font-weight: 700; font-size: 1.3rem; }
+        .chaos-subline { margin: .1rem 0 0; color: #495057; font-size: .85rem; }
+        .chaos-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 1.5rem; }
+        .chaos-head-text { flex: 1 1 auto; min-width: 0; }
+        .chaos-clock { flex: 0 0 auto; text-align: right; }
+        .chaos-timer { font-size: 2.4rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; color: #6c757d; }
+        .chaos-timer.running { color: #fd7e14; }
+        .chaos-recovered { font-size: .95rem; font-weight: 600; color: #198754; }
+        .chaos-scenario h3 { margin-top: .4rem; font-size: 1.05rem; }
+        .chaos-scenario h4 { font-size: .68rem; text-transform: uppercase; letter-spacing: .06em; color: #6c757d; margin: .45rem 0 .05rem; }
+        .chaos-scenario p { margin-bottom: .1rem; }
+        .chaos-actions { margin-bottom: .1rem; padding-left: 1.2rem; }
+        .chaos-actions li.current { font-weight: 700; color: #fd7e14; }
+        .chaos-current { font-weight: 700; color: #fd7e14; }
+        .chaos-steps { list-style: none; padding: 0; margin: .45rem 0 0; font-size: .82rem; }
+        .chaos-steps li { padding: .1rem 0; border-top: 1px solid rgba(0,0,0,.08); }
+        .chaos-steps .badge-status { display: inline-block; min-width: 3.6rem; text-align: center; border-radius: .3rem; font-size: .7rem; font-weight: 700; padding: .1rem .4rem; margin-right: .6rem; color: #fff; background: #6c757d; }
+        .chaos-steps .pass .badge-status { background: #198754; }
+        .chaos-steps .fail .badge-status { background: #dc3545; }
+        .chaos-steps .step-seconds { margin-left: .6rem; color: #6c757d; font-variant-numeric: tabular-nums; }
+        .chaos-steps .step-note { margin-left: .6rem; color: #495057; }
+        .aadb-line { margin-bottom: .35rem; min-height: 1.9rem; }
+        .aadb-line .badge { font-size: .95rem; }
+        .aadb-link { margin-left: .6rem; font-size: .9rem; }
+        .aadb-link.ok { color: #198754; }
+        .aadb-link.error { color: #dc3545; font-weight: 700; }
+        .aadb-line.stale { opacity: .55; }
+        .cluster-primary { font-weight: 700; color: var(--redis-text-2); margin-bottom: .4rem; min-height: 1.5rem; }
+        .role-primary { display: inline-block; background: var(--redis-hyper); color: #fff; border-radius: .3rem; font-size: .75rem; font-weight: 700; padding: .05rem .4rem; margin: 0 .5rem 0 .25rem; letter-spacing: .04em; }
+        .list-group-item.stale-node { opacity: .55; }
+        .cluster-warning { color: #b35c00; font-weight: 600; font-size: .9rem; min-height: 1.3rem; }
+        .role-replica { color: #6c757d; font-size: .85rem; margin: 0 .5rem 0 .25rem; }
+        .age { font-size: .8rem; color: #6c757d; margin-left: .5rem; }
+        .badge-lg { font-size: 1rem; }
     </style>
 </head>
 <body>
+    <header class="chaos-header container">
+        {% if logo %}<img src="{{ url_for('static', filename=logo) }}" alt="Redis" height="34">{% endif %}
+        <span class="chaos-title">Active-Active chaos console</span>
+    </header>
     <div class="container">
+        <div id="chaos" aria-live="polite"></div>
+
         <div class="row">
             <h2 class="pb-2 border-bottom">Redis endpoint availability</h2>
             <div class="col-sm">
@@ -28,120 +71,180 @@
             <div class="col-sm">
                 <h3>Failover-Enabled</h3>
                 <div id="status_failover"></div>
-                
             </div>
             <div class="col-sm">
                 <h3>{{ region2 }}</h3>
                 <div id="status_{{ region2 }}"></div>
             </div>
-            
         </div>
-        <div class="row">
-        <p>  </p>
-        </div>
-        <div class="row">
+        <div class="row mt-3">
             <h2 class="pb-2 border-bottom">Redis Enterprise Cluster status</h2>
             <div class="col-md">
                 <h3>redis-{{ region1 }}</h3>
+                <div class="aadb-line" id="aadb_{{ region1 }}"></div>
+                <div class="cluster-primary" id="primary_{{ region1 }}"></div>
+                <div class="cluster-warning" id="warn_{{ region1 }}"></div>
                 <ul class="list-group" id="cl_{{ region1 }}"></ul>
+                <div class="age" id="age_cl_{{ region1 }}"></div>
             </div>
             <div class="col-md">
                 <h3>redis-{{ region2 }}</h3>
+                <div class="aadb-line" id="aadb_{{ region2 }}"></div>
+                <div class="cluster-primary" id="primary_{{ region2 }}"></div>
+                <div class="cluster-warning" id="warn_{{ region2 }}"></div>
                 <ul class="list-group" id="cl_{{ region2 }}"></ul>
+                <div class="age" id="age_cl_{{ region2 }}"></div>
             </div>
         </div>
     </div>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/js/bootstrap.bundle.min.js" integrity="sha384-HwwvtgBNo3bZJJLYd8oVXjrBZt8cqVSpeBNS5n7C8IVInixGAoxmnlMuBnhbgrkm" crossorigin="anonymous"></script>
-<script>
-        function getRedisStatus(region) {
-            $.ajax({
-                type: "GET",
-                url: "redis/"+region
-            }).then(function(data) {
-                $("#status_"+region).empty()
-                if (data.message.includes("Error")) {
-                    cls="bg-danger"
-                } else {
-                    cls="bg-success"
-                }
-                $("#status_"+region).append("<span class=\"badge "+cls+"\">"+data.message+"</span>")
+
+    <script src="{{ url_for('static', filename='chaos.js') }}"></script>
+    <script>
+    (function () {
+        const C = window.ChaosUI;
+        const region1 = {{ region1|tojson }}, region2 = {{ region2|tojson }};
+        const FETCH_TIMEOUT_MS = 8000;
+        const $ = (id) => document.getElementById(id);
+
+        let chaosState = { server_time: 0, active: false, run: null };
+        let stateFetchedAt = performance.now();
+        const lastOk = {};            // source -> performance.now() of its last good answer
+
+        const getJson = (url) => (signal) =>
+            fetch(url, { signal, cache: 'no-store' }).then((r) => {
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                return r.json();
             });
-        }
+        const agoSec = (name) => (lastOk[name] === undefined ? null : (performance.now() - lastOk[name]) / 1000);
+        const active = () => chaosState.active;
+        const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+        const loop = (fetchFn, onResult, onError, isActive) =>
+            C.runSource({ fetchFn, onResult, onError, isActive, sleep, now: () => performance.now(),
+                          shouldStop: () => false, timeoutMs: FETCH_TIMEOUT_MS });
 
-        function getRedisStatusHA() {
-            $.ajax({
-                type: "GET",
-                url: "redisha"
-            }).then(function(data) {
-                $("#status_failover").empty()
-                if (data.message.includes("Error")) {
-                    cls="bg-danger"
-                } else {
-                    cls="bg-success"
+        // ---- the chaos banner: state polled every second (in-memory on the server) ------------
+        function paintBanner() {
+            C.renderBanner(document, $('chaos'), C.bannerModel(chaosState, (performance.now() - stateFetchedAt) / 1000));
+        }
+        loop(getJson('api/chaos/state'),
+             (s) => { chaosState = s; stateFetchedAt = performance.now(); paintBanner(); },
+             () => {},
+             () => true);
+        setInterval(paintBanner, 500);
+
+        // ---- Redis endpoints --------------------------------------------------------------------
+        function paintBadge(id, badge) {
+            const box = $(id);
+            const span = document.createElement('span');
+            span.className = 'badge badge-lg ' + ({ ok: 'bg-success', error: 'bg-danger', unreachable: 'bg-secondary' })[badge.kind];
+            span.textContent = badge.text;
+            const age = document.createElement('span');
+            age.className = 'age';
+            age.dataset.source = id;
+            age.textContent = C.ageText(agoSec(id));
+            box.replaceChildren(span, age);
+        }
+        function watchRedis(id, url) {
+            loop(getJson(url),
+                 (res) => { if (!String(res.message).includes('Error')) lastOk[id] = performance.now(); paintBadge(id, C.redisBadge(res, agoSec(id))); },
+                 () => paintBadge(id, C.redisBadge(null, agoSec(id))),
+                 active);
+        }
+        watchRedis('status_' + region1, 'redis/' + region1);
+        watchRedis('status_' + region2, 'redis/' + region2);
+        watchRedis('status_failover', 'redisha');
+
+        // ---- Redis Enterprise clusters -----------------------------------------------------------
+        function paintCluster(region, model) {
+            const ul = $('cl_' + region);
+            const rows = [];
+            $('warn_' + region).textContent = model.banner || '';
+            if (model.error) {
+                const li = document.createElement('li');
+                li.className = 'list-group-item list-group-item-secondary';
+                li.textContent = model.error;
+                rows.push(li);
+            }
+            model.nodes.forEach((n) => {
+                const li = document.createElement('li');
+                li.className = 'list-group-item ' + (n.kind === 'ok' ? 'list-group-item-success'
+                    : n.kind === 'stale' ? 'list-group-item-secondary stale-node' : 'list-group-item-danger');
+                li.appendChild(document.createTextNode(n.name + (n.hostname ? ' (' + n.hostname + ')' : '') + ' ' + n.status));
+                if (n.roleText) {
+                    const r = document.createElement('span');
+                    r.className = n.isPrimary ? 'role-primary' : 'role-replica';
+                    r.textContent = n.roleText;
+                    li.appendChild(r);
                 }
-                $("#status_failover").append("<span class=\"badge "+cls+"\">"+data.message+"</span>")
-                //$("#status_east").append(Math.random())
-                //alert(data.message)
+                n.shards.forEach((s) => {
+                    const b = document.createElement('span');
+                    b.className = 'badge rounded-pill ' + (s.kind === 'ok' ? 'text-bg-success' : 'text-bg-danger') + ' me-1';
+                    b.textContent = s.text;
+                    li.appendChild(b);
+                });
+                rows.push(li);
             });
+            ul.replaceChildren(...rows);
+            $('primary_' + region).textContent = model.primaryText || '';
         }
-
-        function getClusterStatus(region) {
-            $.ajax({
-                type: "GET",
-                url: "cluster/"+region
-            }).then(function(data) {
-                //alert(data)
-                $("#cl_"+region).empty()
-                if (data.hasOwnProperty("message")) {
-                    $("#cl_"+region).append("<span class=\"badge bg-danger\">"+data.message+"</span>")
-                }
-                //alert(data.node_1)
-                for (i=1;i<4;i++) {
-                    node="node_"+i
-                    status=data[node].status
-                    if (status=="active") {
-                        list_class="list-group-item-success"
-                    }
-                    if (status=="down") {
-                        list_class="list-group-item-danger"
-                    }
-                    shards=""
-                    for (const shard of data[node].shards) {
-                        if (shard.status=="active") {
-                            shard_color=" text-bg-success "
-                        } else if (shard.status=="recovery") {
-                            shard_color=" text-bg-danger "
-                            //recovery
-                        } else {
-                            shard_color=" text-bg-danger "
-                            //recovery
-                        }
-                        shards=shards+"<span class=\"badge rounded-pill "+shard_color+"\">db-"+shard.bdb_uid+" "+shard.role+" " + shard.detailed_status+"</span>";
-                    }
-                    $("#cl_"+region).append("<li class=\"list-group-item "+list_class+"\">"+node+" "+status+" "+shards+"</li>")                    
-                }
-
-                //$("#status_east").append(Math.random())
-                //alert(data.message)
-            });
+        const lastGoodCluster = {};   // region -> last model without error
+        function watchCluster(region) {
+            const key = 'cl_' + region;
+            const show = (data) => {
+                const v = C.clusterView(data, lastGoodCluster[region]);
+                if (!v.stale && !v.error) { lastGoodCluster[region] = v; lastOk[key] = performance.now(); }
+                paintCluster(region, v);
+            };
+            loop(getJson('cluster/' + region), show, () => show(null), active);
         }
-        region1="{{ region1 }}"
-        region2="{{ region2 }}"
-        
-        function updateDashboard() {
-            getRedisStatus(region1)
-            getRedisStatus(region2)
-            getRedisStatusHA()
-            getClusterStatus(region1)
-            getClusterStatus(region2)
-        }
+        watchCluster(region1);
+        watchCluster(region2);
 
-        //run these once to populate the screen
-        updateDashboard()
-        
-        var intervalId = window.setInterval(function(){
-            updateDashboard()
-        }, 5000); 
-</script>
+        // ---- the Active-Active database as seen by each cluster -----------------------------------
+        const lastGoodAadb = {};
+        function paintAadb(region, v) {
+            const box = $('aadb_' + region);
+            const parts = [];
+            const label = document.createElement('strong');
+            label.textContent = 'Active-Active database ' + (v.name || '') + ' ';
+            parts.push(label);
+            if (v.error) {
+                const b = document.createElement('span');
+                b.className = 'badge bg-secondary';
+                b.textContent = v.error;
+                parts.push(b);
+            } else {
+                const b = document.createElement('span');
+                b.className = 'badge ' + ({ ok: 'bg-success', warn: 'bg-warning text-dark', error: 'bg-danger', stale: 'bg-secondary' })[v.kind];
+                b.textContent = v.statusText;
+                parts.push(b);
+                v.links.forEach((l) => {
+                    const s = document.createElement('span');
+                    s.className = 'aadb-link ' + l.kind;
+                    s.textContent = l.text;
+                    parts.push(s);
+                });
+            }
+            box.className = 'aadb-line' + (v.stale ? ' stale' : '');
+            box.replaceChildren(...parts);
+        }
+        function watchAadb(region) {
+            const show = (data) => {
+                const v = C.aadbView(data, lastGoodAadb[region]);
+                if (!v.stale && !v.error) lastGoodAadb[region] = v;
+                paintAadb(region, v);
+            };
+            loop(getJson('aadb/' + region), show, () => show(null), active);
+        }
+        watchAadb(region1);
+        watchAadb(region2);
+
+        // ages tick every second without any request
+        setInterval(() => {
+            document.querySelectorAll('.age[data-source]').forEach((e) => { e.textContent = C.ageText(agoSec(e.dataset.source)); });
+            [region1, region2].forEach((r) => { const e = $('age_cl_' + r); if (e) e.textContent = C.ageText(agoSec('cl_' + r)); });
+        }, 1000);
+    })();
+    </script>
 </body>
 </html>

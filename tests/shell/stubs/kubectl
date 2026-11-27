@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# kubectl stub for the chaos.sh tests: everything is healthy, every call is logged.
+D="${STUB_DIR:?}"
+echo "kubectl $*" >> "$D/calls.log"; echo "kubectl $*" >> "$D/order.log"
+ctx=""; args=("$@")
+for ((i = 0; i < ${#args[@]}; i++)); do
+  case "${args[$i]}" in --context) ctx="${args[$((i + 1))]}" ;; --context=*) ctx="${args[$i]#--context=}" ;; esac
+done
+rec=rec-a; [ "$ctx" = cl-b ] && rec=rec-b
+a="$*"
+case "$a" in
+  # step 04 / lib: REST calls made INSIDE a REC pod through `exec -i ... curl` (stdin carries the credentials)
+  *"exec -i"*"fields=uid,name"*)
+    cat >/dev/null; n=$(( $(cat "$D/bdb_calls" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$D/bdb_calls"
+    if [ "$n" -le "${STUB_BDB_MISSING:-0}" ]; then echo '[]'; else echo '[{"uid":7,"name":"aadb"}]'; fi ;;
+  *"exec -i"*"-X PUT"*) cat >/dev/null; printf '%s' "${STUB_PUT_CODE:-200}" ;;
+  *"get ns"*) echo namespace/rec ;;
+  *"get nodes"*"jsonpath"*) printf 'node-1' ;;
+  *"get pod "*"nodeName"*) p="${a#*get pod }"; p="${p%% *}"; printf 'vm-of-%s' "$p" ;;
+  *"get node "*) printf 'zone-1' ;;
+  *"get nodes"*) { [ -e "$D/pool0" ] && [ -z "${STUB_NODES_REMAIN:-}" ]; } || printf 'n1 Ready <none> 1h v1\nn2 Ready <none> 1h v1\nn3 Ready <none> 1h v1\n' ;;
+  *"get pods"*) printf '%s-0 2/2 Running 0 1h\n%s-1 2/2 Running 0 1h\n%s-2 2/2 Running 0 1h\nredis-enterprise-operator-x 2/2 Running 0 1h\n%s-services-rigger-x 1/1 Running 0 1h\n' "$rec" "$rec" "$rec" "$rec" ;;
+  *"get rec "*"jsonpath"*) echo Running ;;
+  *"get rerc"*) printf 'rec-a Active Valid true\nrec-b Active Valid false\n' ;;
+  *"get reaadb"*) printf '%s' "${STUB_REAADB:-active/up}" ;;
+  *"get svc"*) printf '12000' ;;
+  *"get secret"*) : ;;
+  *"rladmin status nodes"*) printf '*node:1 master 1 OK\nnode:2 slave 2 OK\nnode:3 slave 3 OK\n' ;;
+  *"rladmin status databases"*)
+    if [ -n "${STUB_RECOVER_NEEDED:-}" ] && [ ! -e "$D/recovered" ]; then printf 'db:1 aadb redis down 1\n'
+    else printf 'db:1 aadb redis active 1\n'; fi ;;
+  *"rladmin recover all"*) touch "$D/recovered"; echo "[aadb (db:1) recovery] Completed successfully" ;;
+  *"rladmin status"*)
+    # topology variants: default = node1 master+endpoint, node2 replica (1 shard), node3 replica (0 shard)
+    r1=master; r2=slave; r3=slave; s1=1; s2=1; s3=0; ep=1
+    case "${STUB_TOPOLOGY:-}" in
+      master-on-3)   r1=slave;  r2=slave;  r3=master; s1=1; s2=0; s3=1; ep=3 ;;
+      master-on-2)   r1=slave;  r2=master; r3=slave;  s1=1; s2=1; s3=0; ep=2 ;;
+      failed-over)   r1=slave;  r2=slave;  r3=master; s1=1; s2=1; s3=0; ep=3 ;;
+    esac
+    printf 'CLUSTER NODES:\nNODE:ID ROLE ADDRESS EXTERNAL_ADDRESS HOSTNAME SHARDS CORES FREE_RAM PROVISIONAL_RAM VERSION STATUS\n'
+    printf 'node:1  %s 10.0.17.6  10.0.17.6  %s-0 %s/100 8 1GB 1GB 8.2 OK\n' "$r1" "$rec" "$s1"
+    printf '*node:2 %s 10.0.16.15 10.0.16.15 %s-1 %s/100 8 1GB 1GB 8.2 OK\n' "$r2" "$rec" "$s2"
+    printf 'node:3  %s 10.0.18.5  10.0.18.5  %s-2 %s/100 8 1GB 1GB 8.2 OK\n' "$r3" "$rec" "$s3"
+    printf '\nDATABASES:\nDB:ID NAME TYPE STATUS\ndb:1 aadb redis active\n\nENDPOINTS:\nDB:ID NAME ID NODE ROLE SSL\ndb:1 aadb endpoint:1:1 node:%s single Replica\n\nSHARDS:\n' "$ep" ;;
+  *"redis-cli"*" SET "*) echo "${a##* SET }" | cut -d' ' -f2 > "$D/val"; echo OK ;;
+  *"redis-cli"*" GET "*) cat "$D/val" 2>/dev/null ;;
+  *"delete pod"*) [ -z "${STUB_SLOW:-}" ] || sleep "$STUB_SLOW"; echo "pod deleted" ;;
+  *" patch rec"*) echo "rec patched" ;;
+  *) : ;;
+esac
+exit 0

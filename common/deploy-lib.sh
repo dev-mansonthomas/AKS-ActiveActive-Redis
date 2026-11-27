@@ -124,11 +124,40 @@ _preflight_fail=0
 
 _need_cmd() {
   if command -v "$1" >/dev/null 2>&1; then
-    re_log "  ✅ $1 $( { $1 --version 2>/dev/null || $1 version 2>/dev/null; } | head -1 | cut -c1-48)"
+    # `kubectl version` without --client CONTACTS the current cluster: with a stale
+    # context that is a ~30 s timeout inside the preflight (measured 2026-11-25).
+    local _v
+    case "$1" in
+      kubectl) _v=$(kubectl version --client 2>/dev/null | head -1 | cut -c1-48) ;;
+      *)       _v=$( { "$1" --version 2>/dev/null || "$1" version 2>/dev/null; } | head -1 | cut -c1-48) ;;
+    esac
+    re_log "  ✅ $1 $_v"
   else
     re_warn "  ❌ $1 not found${2:+ — $2}"
     _preflight_fail=$((_preflight_fail + 1))
   fi
+}
+
+# deploy_preflight_destroy — the MINIMUM needed to tear down safely.
+# Teardown must never be blocked by checks that only matter for creating things
+# (machine-type availability, IAM for new resources, name collisions, DNS zone
+# presence...): a demo that cannot be destroyed keeps billing and stays exposed
+# (ADR 0010). So: tools + a working credential, nothing else.
+deploy_preflight_destroy() {
+  re_log "🔎 Minimal preflight for DESTROY ($DEPLOY_CLOUD) — creation checks skipped on purpose"
+  _need_cmd tofu    "https://opentofu.org/docs/intro/install/"
+  _need_cmd kubectl
+  _need_cmd helm
+  _need_cmd jq
+  if declare -F cloud_auth_check >/dev/null 2>&1; then
+    cloud_auth_check || _preflight_fail=$((_preflight_fail + 1))
+  else
+    re_warn "  no cloud credential check defined for $DEPLOY_CLOUD — relying on the tools themselves"
+  fi
+  if [ "$_preflight_fail" -gt 0 ]; then
+    re_die "cannot destroy: $_preflight_fail prerequisite(s) missing — nothing was changed"
+  fi
+  re_log "✅ Minimal preflight passed"
 }
 
 deploy_preflight() {
@@ -234,7 +263,19 @@ deploy_main() {
   re_log " Redis Enterprise Active/Active — $(re_upper "$DEPLOY_CLOUD")"
   re_log "═══════════════════════════════════════════════════════════"
 
-  [ "$SKIP_PREFLIGHT" -eq 1 ] && re_warn "preflight skipped (--skip-preflight)" || deploy_preflight
+  # ALWAYS enforced, even with --skip-preflight: running the wrong cloud's script
+  # against a config.sh for another cloud would act on the wrong cloud's resources.
+  if [ "$CLOUD_PROVIDER" != "$DEPLOY_CLOUD" ]; then
+    re_die "config.sh has CLOUD_PROVIDER=$CLOUD_PROVIDER but you ran ./${DEPLOY_CLOUD}-deploy.sh — set CLOUD_PROVIDER=$DEPLOY_CLOUD in config.sh"
+  fi
+
+  if [ "$SKIP_PREFLIGHT" -eq 1 ]; then
+    re_warn "preflight skipped (--skip-preflight)"
+  elif [ "$DESTROY" -eq 1 ]; then
+    deploy_preflight_destroy
+  else
+    deploy_preflight
+  fi
 
   # ---------------------------------------------------------------- plan only
   if [ "$PLAN_ONLY" -eq 1 ]; then

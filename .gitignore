@@ -26,3 +26,6 @@ yaml/*
 
 .DS_Store
 nohup.out
+flask/tests/.logs/
+# Redis logo = trademark asset, downloaded by hand from brand.redis.io (see README)
+flask/static/brand/

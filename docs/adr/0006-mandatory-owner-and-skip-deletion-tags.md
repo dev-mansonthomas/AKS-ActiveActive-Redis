@@ -40,7 +40,7 @@ one component that is genuinely complete on all three clouds; AWS/GCP `default_t
   | `google_compute_network` | ❌ |
   | `google_compute_subnetwork` | ❌ |
   | `google_compute_firewall` | ❌ |
-  | `google_container_node_pool` | ❌ |
+  | `google_container_node_pool` (now inline in the cluster, 2026-11-26: its `node_config.labels` are applied to the nodes) | ❌ |
 
   So **4 of the 5 GCP resource types carry no `owner`/`skip_deletion` at all**,
   and no amount of Terraform can change that. The decision as originally

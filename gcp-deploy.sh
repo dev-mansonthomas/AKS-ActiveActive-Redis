@@ -45,6 +45,26 @@ fi
 # warning, because `tofu plan` is the authoritative test.
 # ============================================================================
 
+# cloud_auth_check — the credentials-only subset used by --destroy.
+cloud_auth_check() {
+  command -v gcloud >/dev/null 2>&1 || { re_warn "  ❌ gcloud not found"; return 1; }
+  re_gcp_select_account
+  local fail=0
+  if ! gcloud auth print-access-token ${CLOUDSDK_CORE_ACCOUNT:+--account="$CLOUDSDK_CORE_ACCOUNT"} >/dev/null 2>&1; then
+    re_warn "  ❌ gcloud CLI credential cannot refresh — run: gcloud auth login"
+    fail=1
+  else
+    re_log "  ✅ gcloud CLI token refreshes"
+  fi
+  if ! gcloud auth application-default print-access-token >/dev/null 2>&1; then
+    re_warn "  ❌ no application-default credentials — run: gcloud auth application-default login"
+    fail=1
+  else
+    re_log "  ✅ application-default credentials present (used by OpenTofu)"
+  fi
+  return "$fail"
+}
+
 cloud_preflight() {
   local fail=0 unverified=0
   _AUTH_BROKEN=0
@@ -359,39 +379,33 @@ cloud_preflight() {
 
   # ---- actAs on the node service account -----------------------------------
   # Creating a GKE cluster needs roles/container.admin AND
-  # roles/iam.serviceAccountUser on the service account the NODES will use.
-  # We do not set one, so GKE uses the Compute Engine default SA. Missing
-  # actAs is the classic second failure right after container.admin, and it
-  # only surfaces once the cluster create call is made.
-  cloud_q gcloud projects describe "$GCP_PROJECT_ID" --format=value\(projectNumber\)
-  local proj_num="$_Q_OUT" node_sa=""
-  if [ -n "$proj_num" ]; then
-    node_sa="${proj_num}-compute@developer.gserviceaccount.com"
-    if [ -n "${iam_tok:-}" ]; then
-      local sa_resp
-      sa_resp=$(curl -sS -m 20 -X POST \
-        -H "Authorization: Bearer $iam_tok" \
-        -H "Content-Type: application/json" \
-        -d '{"permissions":["iam.serviceAccounts.actAs"]}' \
-        "https://iam.googleapis.com/v1/projects/$GCP_PROJECT_ID/serviceAccounts/$node_sa:testIamPermissions" 2>/dev/null)
-      if printf '%s' "$sa_resp" | jq -e '.permissions[]? | select(. == "iam.serviceAccounts.actAs")' >/dev/null 2>&1; then
-        re_log "  ✅ can actAs the node service account ($node_sa)"
-      elif printf '%s' "$sa_resp" | jq -e '.error' >/dev/null 2>&1; then
-        re_warn "  cannot check actAs on $node_sa: $(printf '%s' "$sa_resp" | jq -r '.error.message' | cut -c1-120)"
-        unverified=$((unverified + 1))
-      else
-        re_warn "  ❌ missing iam.serviceAccounts.actAs on the node service account:"
-        re_warn "         $node_sa"
-        re_warn "     GKE cluster creation needs it in addition to container.admin:"
-        re_warn "       gcloud iam service-accounts add-iam-policy-binding $node_sa \\"
-        re_warn "         --member=serviceAccount:${CLOUDSDK_CORE_ACCOUNT:-SA} \\"
-        re_warn "         --role=roles/iam.serviceAccountUser --project $GCP_PROJECT_ID"
-        fail=$((fail + 1))
-      fi
+  # roles/iam.serviceAccountUser (actAs) on the service account the NODES run
+  # as: GCP_NODE_SERVICE_ACCOUNT (dedicated, least privilege - docs/gcp-iam.md).
+  # This also catches a node SA that does not exist yet.
+  local node_sa="$GCP_NODE_SERVICE_ACCOUNT"
+  if [ -n "${iam_tok:-}" ]; then
+    local sa_resp
+    sa_resp=$(curl -sS -m 20 -X POST \
+      -H "Authorization: Bearer $iam_tok" \
+      -H "Content-Type: application/json" \
+      -d '{"permissions":["iam.serviceAccounts.actAs"]}' \
+      "https://iam.googleapis.com/v1/projects/$GCP_PROJECT_ID/serviceAccounts/$node_sa:testIamPermissions" 2>/dev/null)
+    if printf '%s' "$sa_resp" | jq -e '.permissions[]? | select(. == "iam.serviceAccounts.actAs")' >/dev/null 2>&1; then
+      re_log "  ✅ can actAs the node service account ($node_sa)"
+    elif printf '%s' "$sa_resp" | jq -e '.error.status == "NOT_FOUND"' >/dev/null 2>&1; then
+      re_warn "  ❌ the node service account does not exist: $node_sa"
+      re_warn "     create it (one-off, needs an IAM admin):  ./gcp-setup.sh --dry-run  then  ./gcp-setup.sh"
+      fail=$((fail + 1))
+    elif printf '%s' "$sa_resp" | jq -e '.error' >/dev/null 2>&1; then
+      re_warn "  cannot check actAs on $node_sa: $(printf '%s' "$sa_resp" | jq -r '.error.message' | cut -c1-120)"
+      unverified=$((unverified + 1))
+    else
+      re_warn "  ❌ missing iam.serviceAccounts.actAs on the node service account:"
+      re_warn "         $node_sa"
+      re_warn "     GKE cluster creation needs it in addition to container.admin."
+      re_warn "     Fix (as an IAM admin):  ./gcp-setup.sh --dry-run  then  ./gcp-setup.sh"
+      fail=$((fail + 1))
     fi
-  else
-    re_warn "  cannot resolve the project number, so the node service account is unknown"
-    unverified=$((unverified + 1))
   fi
 
   # ---- Name lengths --------------------------------------------------------

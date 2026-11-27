@@ -33,7 +33,7 @@ Tools on your machine (the **host**, not a VM — they need your cloud credentia
 
 | Tool | Notes |
 |---|---|
-| `bash` 5 | macOS ships bash 3: `brew install bash` |
+| `bash` 5 | macOS ships bash 3.2. `brew install bash`, then put Homebrew's `bin` first in your `PATH` (`/opt/homebrew/bin` on Apple silicon): every script starts with `#!/usr/bin/env bash`, so it picks up that bash, and refuses to run with an older one (message tells you what to do). Check: `bash --version` |
 | `tofu` (OpenTofu ≥ 1.6) | **not** `terraform` |
 | `kubectl`, `helm`, `jq`, `curl`, `python3` | |
 | your cloud CLI | `gcloud` (+ `gke-gcloud-auth-plugin`), `aws` or `az` |
@@ -174,6 +174,7 @@ Needs `uv`, a recent `node`, `shellcheck`, `ruff`. The tests never contact a clo
 | *no managed zone for …* in the preflight | wrong DNS zone name or project | the preflight lists the zones that exist: copy the right one into `config.sh` |
 | `redis-cli`: *certificate verify failed* / `Protocol error, got "H"` | no SNI, or the certificate is self-signed | use `--insecure --sni <host>` |
 | `WRONGPASS` | empty user name | use `default:<password>@` |
+| `FATAL: bash 5+ is required` | the `bash` first in your `PATH` is macOS's 3.2 | `brew install bash` and put `/opt/homebrew/bin` first in `PATH` |
 | `chaos.sh` exits 3 | the health gate found a problem | read the ❌ lines (each has a hint) and the log in `debug/` |
 | Redis pods stuck at `1/2` after a chaos run, `rladmin` unreachable | the REC lost its quorum | `./scripts/chaos.sh --scenario region-recover` |
 | a command hangs on `kubectl get pods -w` | it is a watch | Ctrl-C |

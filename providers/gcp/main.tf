@@ -148,11 +148,6 @@ resource "google_container_cluster" "region1" {
   network    = google_compute_network.vpc.name
   subnetwork = google_compute_subnetwork.region1.name
 
-  # GKE always creates a default node pool; we throw it away and attach the
-  # managed one below. initial_node_count MUST be > 0 or the API rejects the
-  # cluster with 400 "initial_node_count must be greater than zero".
-  remove_default_node_pool = true
-  initial_node_count       = var.initial_node_count
   # Deliberately NOT configurable. The google provider defaults this to true
   # since v6.0, which makes `tofu destroy` fail with:
   #   "Cannot destroy cluster because deletion_protection is set to true"
@@ -202,6 +197,50 @@ resource "google_container_cluster" "region1" {
     skip_deletion = var.skip_deletion
   }
 
+  # The pool is declared INSIDE the cluster on purpose. A separate
+  # google_container_node_pool needs the default pool to be created and then deleted
+  # first (remove_default_node_pool): ~1m40 of waiting, plus a second ~1m30 to
+  # create ours. Measured on 2026-11-25. Created inline, it is one operation.
+  node_pool {
+    name       = "${var.cluster_prefix}-${var.region1}-nodes"
+    node_count = var.node_count
+
+    autoscaling {
+      min_node_count = var.node_min_count
+      max_node_count = var.node_max_count
+    }
+
+    node_config {
+      machine_type = var.node_machine_type
+      disk_size_gb = 100
+      disk_type    = "pd-standard"
+
+      # Dedicated least-privilege node SA (docs/gcp-iam.md). The cloud-platform
+      # scope is the Google-recommended pairing: IAM roles, not scopes, bound access.
+      service_account = var.node_service_account
+      oauth_scopes = [
+        "https://www.googleapis.com/auth/cloud-platform"
+      ]
+
+      labels = {
+        owner         = var.owner
+        skip_deletion = var.skip_deletion
+        cluster       = "${var.cluster_prefix}-${var.region1}"
+      }
+
+      tags = ["${var.cluster_prefix}-gke-node", "${var.cluster_prefix}-${var.region1}"]
+
+      workload_metadata_config {
+        mode = "GKE_METADATA"
+      }
+    }
+
+    management {
+      auto_repair  = true
+      auto_upgrade = true
+    }
+  }
+
   timeouts {
     create = var.cluster_timeout
     update = var.cluster_timeout
@@ -209,50 +248,7 @@ resource "google_container_cluster" "region1" {
   }
 }
 
-resource "google_container_node_pool" "region1" {
-  name       = "${var.cluster_prefix}-${var.region1}-nodes"
-  location   = var.region1
-  cluster    = google_container_cluster.region1.name
-  node_count = var.node_count
 
-  autoscaling {
-    min_node_count = var.node_min_count
-    max_node_count = var.node_max_count
-  }
-
-  node_config {
-    machine_type = var.node_machine_type
-    disk_size_gb = 100
-    disk_type    = "pd-standard"
-
-    oauth_scopes = [
-      "https://www.googleapis.com/auth/cloud-platform"
-    ]
-
-    labels = {
-      owner         = var.owner
-      skip_deletion = var.skip_deletion
-      cluster       = "${var.cluster_prefix}-${var.region1}"
-    }
-
-    tags = ["${var.cluster_prefix}-gke-node", "${var.cluster_prefix}-${var.region1}"]
-
-    workload_metadata_config {
-      mode = "GKE_METADATA"
-    }
-  }
-
-  management {
-    auto_repair  = true
-    auto_upgrade = true
-  }
-
-  timeouts {
-    create = var.node_pool_timeout
-    update = var.node_pool_timeout
-    delete = var.node_pool_timeout
-  }
-}
 
 # ============================================================================
 # GKE Cluster - Region 2
@@ -269,8 +265,6 @@ resource "google_container_cluster" "region2" {
   subnetwork = google_compute_subnetwork.region2.name
 
   # Start with minimal node pool (will be replaced by managed node pool)
-  remove_default_node_pool = true
-  initial_node_count       = var.initial_node_count
   # Deliberately NOT configurable. The google provider defaults this to true
   # since v6.0, which makes `tofu destroy` fail with:
   #   "Cannot destroy cluster because deletion_protection is set to true"
@@ -319,6 +313,50 @@ resource "google_container_cluster" "region2" {
     skip_deletion = var.skip_deletion
   }
 
+  # The pool is declared INSIDE the cluster on purpose. A separate
+  # google_container_node_pool needs the default pool to be created and then deleted
+  # first (remove_default_node_pool): ~1m40 of waiting, plus a second ~1m30 to
+  # create ours. Measured on 2026-11-25. Created inline, it is one operation.
+  node_pool {
+    name       = "${var.cluster_prefix}-${var.region2}-nodes"
+    node_count = var.node_count
+
+    autoscaling {
+      min_node_count = var.node_min_count
+      max_node_count = var.node_max_count
+    }
+
+    node_config {
+      machine_type = var.node_machine_type
+      disk_size_gb = 100
+      disk_type    = "pd-standard"
+
+      # Dedicated least-privilege node SA (docs/gcp-iam.md). The cloud-platform
+      # scope is the Google-recommended pairing: IAM roles, not scopes, bound access.
+      service_account = var.node_service_account
+      oauth_scopes = [
+        "https://www.googleapis.com/auth/cloud-platform"
+      ]
+
+      labels = {
+        owner         = var.owner
+        skip_deletion = var.skip_deletion
+        cluster       = "${var.cluster_prefix}-${var.region2}"
+      }
+
+      tags = ["${var.cluster_prefix}-gke-node", "${var.cluster_prefix}-${var.region2}"]
+
+      workload_metadata_config {
+        mode = "GKE_METADATA"
+      }
+    }
+
+    management {
+      auto_repair  = true
+      auto_upgrade = true
+    }
+  }
+
   timeouts {
     create = var.cluster_timeout
     update = var.cluster_timeout
@@ -326,47 +364,4 @@ resource "google_container_cluster" "region2" {
   }
 }
 
-resource "google_container_node_pool" "region2" {
-  name       = "${var.cluster_prefix}-${var.region2}-nodes"
-  location   = var.region2
-  cluster    = google_container_cluster.region2.name
-  node_count = var.node_count
 
-  autoscaling {
-    min_node_count = var.node_min_count
-    max_node_count = var.node_max_count
-  }
-
-  node_config {
-    machine_type = var.node_machine_type
-    disk_size_gb = 100
-    disk_type    = "pd-standard"
-
-    oauth_scopes = [
-      "https://www.googleapis.com/auth/cloud-platform"
-    ]
-
-    labels = {
-      owner         = var.owner
-      skip_deletion = var.skip_deletion
-      cluster       = "${var.cluster_prefix}-${var.region2}"
-    }
-
-    tags = ["${var.cluster_prefix}-gke-node", "${var.cluster_prefix}-${var.region2}"]
-
-    workload_metadata_config {
-      mode = "GKE_METADATA"
-    }
-  }
-
-  management {
-    auto_repair  = true
-    auto_upgrade = true
-  }
-
-  timeouts {
-    create = var.node_pool_timeout
-    update = var.node_pool_timeout
-    delete = var.node_pool_timeout
-  }
-}

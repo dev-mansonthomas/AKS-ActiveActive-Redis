@@ -28,6 +28,7 @@ fi
 # shellcheck source=../common/lib.sh
 . "$_LIB" || { echo "FATAL: failed to load $_LIB" >&2; exit 1; }
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 re_load_config
 re_log_init "02-setup-haproxy"
 re_yaml_dir_init --clean
@@ -35,38 +36,16 @@ re_yaml_dir_init --clean
 # --- Pinned versions (see docs/TODO.md §G) ---------------------------------
 HAPROXY_CHART_VERSION="${HAPROXY_CHART_VERSION:-0.16.1}"
 OPERATOR_VERSION="${OPERATOR_VERSION:-v8.2.0-13}"
-OPERATOR_BUNDLE="https://raw.githubusercontent.com/RedisLabs/redis-enterprise-k8s-docs/${OPERATOR_VERSION}/bundle.yaml"
-DNS_TTL="${DNS_TTL:-60}"
+export HAPROXY_CHART_VERSION OPERATOR_VERSION   # inherited by 02a-setup-cluster.sh
+export DNS_TTL="${DNS_TTL:-60}"
 
 re_log "chart haproxy-ingress=$HAPROXY_CHART_VERSION  operator=$OPERATOR_VERSION"
-
-# ============================================================================
-# wait_until <command> <max_attempts> <sleep_seconds> <message>
-# ============================================================================
-wait_until() {
-  local cmd="$1" max_attempts="$2" sleep_seconds="$3" message="$4"
-  re_log "⏳ $message"
-  local attempt=0
-  until eval "$cmd"; do
-    if [ "$attempt" -ge "$max_attempts" ]; then
-      re_warn "timeout after $((max_attempts * sleep_seconds))s: $message"
-      return 1
-    fi
-    attempt=$((attempt + 1))
-    re_log "   still waiting... ($attempt/$max_attempts)"
-    sleep "$sleep_seconds"
-  done
-  re_log "✅ $message"
-}
 
 # ============================================================================
 # Credentials + Helm repo
 # ============================================================================
 # Provider-specific: delegates to providers/$CLOUD_PROVIDER/get-credentials.sh
 re_kube_credentials
-
-# Provider-specific: gives us create_dns_record for aws/gcp (azure is inline)
-re_dns_lib
 
 re_log "Available kubectl contexts:"
 kubectl config get-contexts -o name 2>/dev/null | sed 's/^/    /' || true
@@ -75,85 +54,41 @@ re_run helm repo add haproxy-ingress https://haproxy-ingress.github.io/charts
 re_run helm repo update
 
 # ============================================================================
-# Per-cluster setup
+# Per-cluster setup — both clusters IN PARALLEL
 # ============================================================================
+# The work for one cluster lives in 02a-setup-cluster.sh, which writes its own
+# log (debug/02a-setup-<rec name>-<ts>.log). Here the two run side by side; their
+# output is also echoed below, prefixed with the RE name, so the console and this
+# log stay readable. A failure on either one fails the step.
+#
 # Pairs of "<kubectl context>:<Redis Enterprise name>". The two are decoupled:
 # the context is the CLOUD cluster name (unique per operator on a shared
 # project), the RE name is the short public identity used in every FQDN.
+SETUP_CLUSTER="$SCRIPT_DIR/02a-setup-cluster.sh"
+[ -r "$SETUP_CLUSTER" ] || re_die "missing $SETUP_CLUSTER"
+
+PIDS=(); NAMES=()
 for PAIR in "$CLUSTER1:$REC_NAME1" "$CLUSTER2:$REC_NAME2"; do
   CLUSTER="${PAIR%%:*}"; REC_NAME="${PAIR##*:}"
-  re_log ""
-  re_log "══════ $CLUSTER  (RE: $REC_NAME) ══════"
-
-  kubectl config use-context "$CLUSTER" >/dev/null \
-    || re_die "no kubectl context '$CLUSTER' (did get-credentials.sh run?)"
-
-  re_ns_ensure "$CLUSTER" "$NS"
-
-  # --- ingress controller -------------------------------------------------
-  re_log "📦 Installing haproxy-ingress $HAPROXY_CHART_VERSION"
-  re_run helm upgrade --install haproxy-ingress haproxy-ingress/haproxy-ingress \
-    --kube-context "$CLUSTER" \
-    --create-namespace --namespace ingress-controller \
-    --version "$HAPROXY_CHART_VERSION" \
-    -f "$TEMPLATES_DIR/haproxy-ingress-values.yaml" \
-    || re_die "$CLUSTER: haproxy-ingress install failed"
-
-  # --- Redis Enterprise operator -----------------------------------------
-  re_log "📦 Installing Redis Enterprise operator $OPERATOR_VERSION"
-  re_run kubectl --context="$CLUSTER" apply -n "$NS" -f "$OPERATOR_BUNDLE" \
-    || re_die "$CLUSTER: operator bundle failed"
-
-  wait_until "kubectl --context=$CLUSTER -n $NS get secret admission-tls >/dev/null 2>&1" \
-    24 5 "$CLUSTER: admission-tls secret" || re_die "$CLUSTER: admission-tls never appeared"
-
-  CERT=$(kubectl --context="$CLUSTER" -n "$NS" get secret admission-tls -o jsonpath='{.data.cert}')
-
-  CRD_NAME="redisenterpriseclusters.app.redislabs.com"
-  wait_until "kubectl --context=$CLUSTER get crd $CRD_NAME >/dev/null 2>&1" \
-    24 5 "$CLUSTER: CRD $CRD_NAME" || re_die "$CLUSTER: REC CRD never registered"
-
-  # --- RedisEnterpriseCluster --------------------------------------------
-  re_render rec.yaml "$YAML_DIR/rec-$REC_NAME.yaml" "REC_NAME=$REC_NAME"
-
-  re_run kubectl --context="$CLUSTER" apply -n "$NS" -f "$YAML_DIR/rec-$REC_NAME.yaml" \
-    || re_die "$CLUSTER: REC apply failed"
-
-  wait_until "kubectl --context=$CLUSTER get rec $REC_NAME -n $NS >/dev/null 2>&1" \
-    24 5 "$CLUSTER: REC object $REC_NAME" || re_die "$CLUSTER: REC object missing"
-
-  # --- ingress address + wildcard DNS ------------------------------------
-  # Azure/GCP publish .ip, AWS ELBs publish .hostname — re_ingress_address
-  # returns whichever is set.
-  wait_until "[ -n \"\$(re_ingress_address $CLUSTER ingress-controller haproxy-ingress)\" ]" \
-    36 10 "$CLUSTER: ingress LoadBalancer address" \
-    || re_die "$CLUSTER: ingress never got an external address"
-
-  CLUSTER_ADDR=$(re_ingress_address "$CLUSTER" ingress-controller haproxy-ingress)
-  re_log "🌐 $CLUSTER ingress address: $CLUSTER_ADDR"
-
-  re_dns_upsert "*.$REC_NAME" "$CLUSTER_ADDR" "$DNS_TTL" \
-    || re_warn "$CLUSTER: DNS record for *.$REC_NAME may not be set"
-
-  # --- admission webhook --------------------------------------------------
-  sed -e "s/NAMESPACE/$NS/g" \
-      -e "s|CERT|$CERT|g" \
-      "$TEMPLATES_DIR/webhook.yaml" > "$YAML_DIR/webhook-$REC_NAME.yaml"
-
-  re_run kubectl --context="$CLUSTER" apply -n "$NS" -f "$YAML_DIR/webhook-$REC_NAME.yaml" \
-    || re_warn "$CLUSTER: webhook apply failed (non-fatal)"
+  re_log "🚀 starting $REC_NAME on $CLUSTER  (own log: debug/02a-setup-$REC_NAME-*.log)"
+  (
+    bash "$SETUP_CLUSTER" "$CLUSTER" "$REC_NAME" 2>&1 \
+      | awk -v p="[$REC_NAME] " '{ print p $0; fflush() }'
+    exit "${PIPESTATUS[0]}"
+  ) &
+  PIDS+=("$!"); NAMES+=("$REC_NAME")
 done
 
-# ============================================================================
-# Wait for both RECs to reach Running
-# ============================================================================
-re_log ""
-for PAIR in "$CLUSTER1:$REC_NAME1" "$CLUSTER2:$REC_NAME2"; do
-  CLUSTER="${PAIR%%:*}"; REC_NAME="${PAIR##*:}"
-  wait_until "[ \"\$(kubectl --context=$CLUSTER get rec $REC_NAME -n $NS -o jsonpath='{.status.state}' 2>/dev/null)\" = \"Running\" ]" \
-    60 10 "$CLUSTER: REC $REC_NAME reaching Running" \
-    || re_die "$CLUSTER: REC did not reach Running — run ./scripts/get-logs.sh"
+SETUP_FAILED=0
+for i in "${!PIDS[@]}"; do
+  if wait "${PIDS[$i]}"; then
+    re_log "✅ ${NAMES[$i]}: cluster setup finished"
+  else
+    re_warn "❌ ${NAMES[$i]}: cluster setup FAILED — see debug/02a-setup-${NAMES[$i]}-latest.log"
+    SETUP_FAILED=1
+  fi
 done
+[ "$SETUP_FAILED" -eq 0 ] || re_die "cluster setup failed on at least one cluster"
 
 # ============================================================================
 # Verify DNS actually resolves before step 03 relies on it
@@ -170,4 +105,4 @@ for REC_NAME in "$REC_NAME1" "$REC_NAME2"; do
   fi
 done
 
-re_log "✅ Both RECs Running. Manifests in ${YAML_DIR#"$REPO_ROOT"/}/"
+re_log "✅ Both RECs Running (set up in parallel). Manifests in ${YAML_DIR#"$REPO_ROOT"/}/"

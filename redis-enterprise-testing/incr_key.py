@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import os
 import sys
 import redis
 import time
@@ -17,6 +18,7 @@ use_pipeline = len(sys.argv) == 6 and sys.argv[5] == "pipe"
 r = redis.Redis(
     host=host,
     port=port,
+    password=os.environ.get("REDIS_PASSWORD") or None,  # env, never argv (visible in ps)
     ssl=True,
     ssl_cert_reqs=None,
     ssl_ca_certs=None

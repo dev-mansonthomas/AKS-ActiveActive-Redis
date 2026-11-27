@@ -30,9 +30,39 @@ total_start=$SECONDS
 FAILED=0
 
 re_log "🗑️  Deleting all resources on $CLOUD_PROVIDER"
+
+# Pin the cloud identity and (re)load kubeconfig BEFORE touching Kubernetes.
+# Otherwise kubectl/gcloud use whatever account is globally active, cannot
+# reach the cluster, and the PVCs / LoadBalancer are silently never deleted.
+re_cloud_select_account
+bash "$REPO_ROOT/providers/$CLOUD_PROVIDER/get-credentials.sh" >/dev/null 2>&1 \
+  || re_warn "could not load kubeconfig for $CLOUD_PROVIDER (clusters may already be gone)"
+
 re_log "🧹 Cleaning up Kubernetes resources (ordered, bounded — see re_k8s_teardown)"
+# Phase 1 on BOTH clusters first: an RERC can only be finalised while the REC
+# it points at still exists, so no cluster may lose its REC before every RERC
+# is gone.
 for CLUSTER in "$CLUSTER1" "$CLUSTER2"; do
-  re_k8s_teardown "$CLUSTER" || FAILED=$((FAILED + 1))
+  re_k8s_teardown "$CLUSTER" crs || true
+done
+for CLUSTER in "$CLUSTER1" "$CLUSTER2"; do
+  re_k8s_teardown "$CLUSTER" infra
+  rc=$?
+  if [ "$rc" -eq 3 ]; then
+    # Unreachable is fine ONLY if the cluster no longer exists.
+    re_cluster_in_state; st=$?
+    if [ "$st" -eq 2 ]; then
+      re_warn "$CLUSTER: unreachable and the Terraform state cannot be read — cannot tell whether the"
+      re_warn "   cluster still exists: PVC disks and the ingress LoadBalancer may be orphaned"
+      FAILED=$((FAILED + 1))
+    elif [ "$st" -eq 0 ]; then
+      re_warn "$CLUSTER: still in Terraform state but unreachable — PVC disks and the"
+      re_warn "   ingress LoadBalancer may be orphaned (see the disk check at the end)"
+      FAILED=$((FAILED + 1))
+    fi
+  elif [ "$rc" -ne 0 ]; then
+    FAILED=$((FAILED + 1))
+  fi
 done
 
 re_log "🌐 Cleaning up DNS records"

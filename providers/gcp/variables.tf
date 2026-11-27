@@ -81,11 +81,6 @@ variable "node_max_count" {
   type        = number
 }
 
-variable "initial_node_count" {
-  description = "Nodes created with the cluster itself (config.sh: GCP_INITIAL_NODE_COUNT)"
-  type        = number
-}
-
 variable "release_channel" {
   description = "GKE release channel (config.sh: GCP_RELEASE_CHANNEL)"
   type        = string
@@ -131,16 +126,6 @@ variable "cluster_timeout" {
   type        = string
 }
 
-variable "node_pool_timeout" {
-  description = <<-EOT
-    Timeout for GKE node-pool create/update/delete (config.sh:
-    GCP_NODE_POOL_TIMEOUT). The provider default is 40m, which this project
-    exceeds regularly (measured: 35m-1h14 for node-pool operations), causing
-    Terraform to abort work that GCP later completes.
-  EOT
-  type        = string
-}
-
 variable "redis_ports" {
   description = <<-EOT
     TCP ports opened for Redis Enterprise (config.sh: GCP_REDIS_PORTS).
@@ -149,4 +134,15 @@ variable "redis_ports" {
     Redis ACLs, not by source-IP filtering.
   EOT
   type        = list(string)
+}
+
+variable "node_service_account" {
+  description = <<-EOT
+    Email of the service account the GKE NODES run as (config.sh:
+    GCP_NODE_SERVICE_ACCOUNT). A dedicated, least-privilege account instead of
+    the Compute Engine default SA (which holds project Editor). It must exist
+    already: the deploying identity cannot create service accounts or edit IAM
+    on purpose. Create it with the commands in docs/gcp-iam.md.
+  EOT
+  type        = string
 }

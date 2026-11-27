@@ -22,7 +22,7 @@ observed behaviour or a doc/code conflict.
 | A2 | ✅ **DONE** — steps 02–05 now source `common/lib.sh`, use `$REPO_ROOT`/`$TEMPLATES_DIR`/`$YAML_DIR`, and the `cat config.sh` lines are gone. Verified by running each script from the repo root, from `scripts/`, and from `/tmp` — identical startup. Also rewrote `providers/*/get-credentials.sh` (they hardcoded the `redis-` prefix and sourced `../../config.sh` relatively). | ✅ |
 | A3 | ✅ **DONE** — solved structurally, not by patching two lines. `common/lib.sh::re_export_tf_vars` exports **every** `TF_VAR_*` from `config.sh` for all three clouds; used by step 01 and teardown. `scripts/verify-config.sh` proves it credential-free. | ✅ |
 | A4 | ✅ **DONE** — `required_providers` pinned at `azurerm ~> 5.4` and `node_provisioning_profile { mode = "Manual" }` added to both clusters. `tofu validate` passes. | ✅ | Azure is now **last** priority (no access). Note azurerm **5.4.0 is the latest release**, so "update to latest" means fixing the code *forward*, **not** pinning back to `~> 4.26`. See §G. |
-| A5 | ✅ **DONE** — all `variables.tf` now have **0 defaults** (azure 12, aws 12, gcp 19 variables) and every value comes from `config.sh`. Also found and fixed: AWS declared 5 variables it never used (`eks_version`, `node_instance_type`, `node_desired/min/max_size`) while hardcoding 1.29 / t3.xlarge. | ✅ |
+| A5 | ✅ **DONE** — all `variables.tf` now have **0 defaults** (azure 13, aws 13, gcp 22 variables as of 2026-11-27) and every value comes from `config.sh`. Also found and fixed: AWS declared 5 variables it never used (`eks_version`, `node_instance_type`, `node_desired/min/max_size`) while hardcoding 1.29 / t3.xlarge. | ✅ |
 | A6 | **Partially done (2026-11-25).** `scripts/chaos.sh` is now provider-dispatched and CWD-independent: **Azure** (verbatim commands, behaviour unchanged) and **GCP** (`gcloud compute instances reset`; region outage = node pool autoscaling off + resize to 0, restored afterwards). **Untested on both** — no Azure access, GCP not yet run. AWS is not supported. `providers/*/chaos-provider.sh` are still dead code: delete or fold in. | 🟠 | Needs one real chaos run on GCP, and one on Azure when access returns. |
 | A7 | ✅ **DONE** — teardown now sources `common/dns-aws.sh` / `common/dns-gcp.sh` and calls `delete_dns_record` per cluster. Those files were dead code since Phase 2/3. | ✅ |
 | A8 | **Partially done.** `re_ingress_address` now returns `.ip` *or* `.hostname`, so step 02's wait works on EKS. **Still missing:** `common/dns-aws.sh` only creates A records, so a hostname needs CNAME/alias support — `re_dns_upsert` now **fails loudly** on AWS instead of writing a broken record. | 🟠 | Milestone 3 (AWS). |
@@ -337,3 +337,13 @@ Added 2026-11-27 (audit trail, health gate and what the first real runs taught):
 - [ ] O14. Operator `status.replicationStatus` stuck at `down` while `rladmin` and the data path are fine (seen 2026-11-26 after pod kills, once more 2026-11-27): root cause unknown; the gate treats it as a warning.
 - [ ] O15. Merge the two `rladmin` calls of `rec_health_line` (≈ 2–3 s per probe); optional `--reset-roles` to place the cluster primary deterministically (`rladmin cluster master set`, untested).
 - [ ] O16. Azure: re-run `pod`, `node`, `region` (L1) and AWS support (A6).
+
+Code review 2026-11-27 (all fixed the same day, tests added):
+- [x] R1. bash 5 required: `common/lib.sh` refuses an older bash with the fix (`brew install bash`, Homebrew first in `PATH`); every script uses `#!/usr/bin/env bash` (`redeploy.sh` was `#!/bin/bash`).
+- [x] R2. `chaos.sh`: the wait for nodes after the region comes back is bounded (`CHAOS_NODES_TIMEOUT`, default `CHAOS_TIMEOUT`); `--scenario`/`--pod` without a value exit 2 with a message.
+- [x] R3. Step 04: the REST look-up of the database retries (≈ 2 min) before failing: the peer instance is created asynchronously (`re_disable_client_auth` moved to `common/lib.sh`).
+- [x] R4. Console: Kubernetes client and admin credentials cached 5 min (were rebuilt every poll, ≈ 4 times a second during a run); dropped on a REST 401; the database password is not cached when absent and is dropped on `WRONGPASS` (rig redeployed under a running console).
+- [x] R5. Teardown: a Terraform state that cannot be read is no longer taken for "cluster gone" (`re_cluster_in_state` returns 0/1/2).
+- [x] R6. Step 03 session-timeout `exec` names its container and keeps the cause in the warning.
+- [x] R7. Executable bit restored on `common/lib.sh` and `config.sh`.
+

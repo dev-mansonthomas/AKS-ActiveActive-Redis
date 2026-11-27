@@ -43,7 +43,7 @@ from `config.sh`); an authenticated cloud CLI session on the **host** (`az login
 
 | | Azure | AWS | GCP |
 |---|---|---|---|
-| Clusters | 2× `azurerm_kubernetes_cluster`, 1 shared `azurerm_resource_group` | 2× `aws_eks_cluster` + 2× `aws_eks_node_group` | 2× `google_container_cluster` + 2× `google_container_node_pool` |
+| Clusters | 2× `azurerm_kubernetes_cluster`, 1 shared `azurerm_resource_group` | 2× `aws_eks_cluster` + 2× `aws_eks_node_group` | 2× `google_container_cluster`, each with its node pool declared inline (`node_pool {}`) |
 | Network | `kubenet`, `load_balancer_sku=standard` | 2× VPC (`10.0.0.0/16`, `10.1.0.0/16`), public+private subnets, IGW, route tables | 1 global VPC, 1 subnet per region, 2 firewall rules |
 | IAM | SystemAssigned identity | 2 roles, 5 managed-policy attachments | default service account |
 | Nodes | fixed `node_count = 3` | desired 3, min 2, max 5 | 3/zone, min 2, max 5 |

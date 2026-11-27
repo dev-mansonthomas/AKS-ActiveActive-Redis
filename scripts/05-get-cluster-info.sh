@@ -87,7 +87,13 @@ for PAIR in "$CLUSTER1:$REC_NAME1" "$CLUSTER2:$REC_NAME2"; do
   echo "#🔑 Password          : $SHOWN_PASSWORD"
   echo "#🌐 Internal FQDN     : $INTERNAL_FQDN"
   if [ -n "$DB_URL" ]; then
-    echo "#🔌 Connection String : rediss://:$SHOWN_DB_PASSWORD@$DB_URL:443"
+    echo "#🗝  DB password       : $SHOWN_DB_PASSWORD   (database '$AA_DB_NAME', not the cluster login above)"
+    # Always spell the user out ("default"): with redis-cli 8.8.0 the form
+    # `rediss://:<pw>@host` (empty user) answers WRONGPASS, `default:<pw>@` works.
+    # redis-cli also needs the SNI (the ingress routes on it; without it you get an
+    # HTTP reply) and --insecure (the certificate is the cluster's own CA).
+    echo "#🔌 Connection String : rediss://default:$SHOWN_DB_PASSWORD@$DB_URL:443"
+    echo "#⌨️  redis-cli         : redis-cli --insecure --sni $DB_URL -u 'rediss://default:$SHOWN_DB_PASSWORD@$DB_URL:443'"
   else
     re_warn "no database ingress host found for $CLUSTER (AA DB not ready?)"
   fi

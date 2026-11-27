@@ -67,37 +67,22 @@ for CLUSTER in "$CLUSTER1" "$CLUSTER2"; do
 done
 
 # ============================================================================
-# Raise the UI session timeout (done last: needs the admin credentials above)
+# Raise the UI session timeout
 # ============================================================================
+# `rladmin cluster config cm_session_timeout_minutes` run INSIDE the REC pod
+# (the same way scripts/rladmin.sh does): no credentials, nothing on the wire,
+# no TLS verification to disable. The previous implementation PUT /v1/cluster
+# through the public ingress with `curl -k -u admin:password`, i.e. admin
+# credentials in argv and sent without verifying the certificate.
 re_log "🔧 Setting Cluster Manager session timeout to ${UI_SESSION_TIMEOUT_MINUTES} min"
 for PAIR in "$CLUSTER1:$REC_NAME1" "$CLUSTER2:$REC_NAME2"; do
   CLUSTER="${PAIR%%:*}"; REC_NAME="${PAIR##*:}"
-  ADMIN_USERNAME=$(kubectl --context="$CLUSTER" -n "$NS" get secret "$REC_NAME" \
-    -o jsonpath='{.data.username}' | re_b64_decode)
-  ADMIN_PASSWORD=$(kubectl --context="$CLUSTER" -n "$NS" get secret "$REC_NAME" \
-    -o jsonpath='{.data.password}' | re_b64_decode)
-
-  API_HOST=$(kubectl --context="$CLUSTER" get ingress -n "$NS" \
-    -o jsonpath='{range .items[*].spec.rules[*]}{.host}{"\n"}{end}' 2>/dev/null \
-    | grep -E '^api\.' | head -1)
-
-  if [ -z "$API_HOST" ]; then
-    re_warn "$CLUSTER: no 'api.*' ingress host found — skipping UI timeout"
-    continue
-  fi
-
-  # PUT /v1/cluster with cm_session_timeout_minutes — verified against the
-  # Redis Software REST API reference. The previous code used
-  # `PATCH /v1/settings/ui` with `ui_session_timeout` in SECONDS: wrong method,
-  # wrong path (404) and wrong unit.
-  # -k: the operator issues self-signed certs. --fail so a non-2xx is visible.
-  if curl -sS -k --fail -u "$ADMIN_USERNAME:$ADMIN_PASSWORD" \
-      -X PUT "https://$API_HOST/v1/cluster" \
-      -H "Content-Type: application/json" \
-      -d "{\"cm_session_timeout_minutes\": $UI_SESSION_TIMEOUT_MINUTES}" >/dev/null; then
+  if out=$(kubectl --context="$CLUSTER" -n "$NS" exec "$REC_NAME-0" -c redis-enterprise-node -- \
+       rladmin cluster config cm_session_timeout_minutes "$UI_SESSION_TIMEOUT_MINUTES" 2>&1); then
     re_log "✅ $REC_NAME: session timeout set to ${UI_SESSION_TIMEOUT_MINUTES} min"
   else
-    re_warn "$CLUSTER: PUT /v1/cluster failed on https://$API_HOST (non-fatal)"
+    re_warn "$CLUSTER: could not set the session timeout on $REC_NAME-0 (non-fatal)"
+    re_warn "   cause: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-200)"
     re_warn "   the Cluster Manager will log you out after its default 15 min"
   fi
 done

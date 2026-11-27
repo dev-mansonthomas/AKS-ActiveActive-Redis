@@ -163,9 +163,12 @@ echo -e "${YELLOW}4. Summary - All Resources by Label${NC}"
 echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
-echo -e "${BLUE}All GCP resources labeled with owner=$owner:${NC}"
+echo -e "${BLUE}Resources labeled owner=$owner whose name carries this rig's prefix (${CLUSTER_PREFIX}):${NC}"
+echo -e "  (informational: Cloud Asset lags a few minutes — a just-deleted node pool can still show as STOPPING;"
+echo -e "   the name-based checks above are the verdict. Other projects' resources of the same owner are filtered out.)"
 gcloud asset search-all-resources \
   --scope="projects/${GCP_PROJECT_ID}" \
-  --query="labels.owner=${owner}" \
-  --format="table(name,assetType,location)" 2>/dev/null || echo "No resources found (gcloud asset search may not be enabled)"
+  --query="labels.owner=${owner} AND name:${CLUSTER_PREFIX}" \
+  --format="table(name.basename(),assetType.basename(),location,state)" \
+  || echo -e "  ${YELLOW}⚠ asset search failed (needs cloudasset API + roles/cloudasset.viewer — see docs/gcp-iam.md)${NC}"
 echo ""

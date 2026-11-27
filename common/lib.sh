@@ -1,11 +1,20 @@
 #!/usr/bin/env bash
 # ============================================================================
 # Fail early and clearly if this file is sourced by something too old, rather
-# than dying later on a missing function. Everything here is written to be
-# parseable by bash 3.2 (which macOS still ships as /bin/bash).
+# than dying later on a missing feature. Bash 5 is required (README prerequisites):
+# macOS still ships bash 3.2 as /bin/bash, so every script asks the PATH for bash
+# (`#!/usr/bin/env bash`) and Homebrew's bash 5 is used as soon as it comes first.
+# This block itself is written to be parseable by bash 3.2 so the message can be shown.
 # ============================================================================
 if [ -z "${BASH_VERSION:-}" ]; then
   echo "FATAL: common/lib.sh requires bash (not sh/dash/zsh)" >&2
+  return 1 2>/dev/null || exit 1
+fi
+if [ "${BASH_VERSINFO[0]}" -lt "${RE_MIN_BASH_MAJOR:-5}" ]; then
+  echo "FATAL: bash ${RE_MIN_BASH_MAJOR:-5}+ is required, this is bash $BASH_VERSION." >&2
+  echo "       macOS ships bash 3.2. Fix:  brew install bash" >&2
+  echo "       then make sure Homebrew's bin comes first in your PATH (/opt/homebrew/bin on Apple silicon)," >&2
+  echo "       so that '#!/usr/bin/env bash' finds it. Check with:  bash --version" >&2
   return 1 2>/dev/null || exit 1
 fi
 # ============================================================================
@@ -33,7 +42,7 @@ fi
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export REPO_ROOT
 
-DEBUG_DIR="$REPO_ROOT/debug"
+DEBUG_DIR="${DEBUG_DIR:-$REPO_ROOT/debug}"
 export DEBUG_DIR
 
 # Templates (tracked) and generated manifests (gitignored).
@@ -48,8 +57,10 @@ export TEMPLATES_DIR YAML_DIR
 # Load config.sh exactly once, whatever the current directory.
 re_load_config() {
   if [ -n "${RE_CONFIG_LOADED:-}" ]; then return 0; fi
-  if [ ! -f "$REPO_ROOT/config.sh" ]; then
-    echo "❌ $REPO_ROOT/config.sh not found." >&2
+  # RE_CONFIG_FILE: tests point this at a fixture; normal runs use <repo>/config.sh.
+  local cfg="${RE_CONFIG_FILE:-$REPO_ROOT/config.sh}"
+  if [ ! -f "$cfg" ]; then
+    echo "❌ $cfg not found." >&2
     echo "   Copy the template first:  cp config.example.sh config.sh" >&2
     return 1
   fi
@@ -59,7 +70,7 @@ re_load_config() {
   # "CLOUD_PROVIDER: unbound variable".
   set -a
   # shellcheck source=/dev/null
-  . "$REPO_ROOT/config.sh" || { set +a; return 1; }
+  . "$cfg" || { set +a; return 1; }
   set +a
   RE_CONFIG_LOADED=1
   export RE_CONFIG_LOADED
@@ -241,16 +252,23 @@ re_tofu_init() {
 # _re_is_transient <output> — worth retrying, or hopeless?
 # Retrying a deterministic failure just wastes minutes and hides the real
 # message. Only network/rate-limit style failures are retryable.
+#
+# Only the ERROR text is classified, never the whole captured output: that also
+# holds resource ids, operation ids and durations ("operation-17004500",
+# "after 500s"), where a bare "500" or "503" is meaningless. HTTP codes are
+# matched as whole numbers. quotaExceeded is deliberately NOT transient (a quota
+# does not fix itself in 30 s), nor is a bare "unavailable" (e.g. machine type).
 _re_is_transient() {
-  case "$1" in
-    *"no such host"*|*"dial tcp"*|*"connection refused"*|*"connection reset"* \
-    |*"i/o timeout"*|*"TLS handshake timeout"*|*"Client.Timeout"* \
-    |*"cannot fetch token"*|*"EOF"*|*"try again"* \
-    |*"rateLimitExceeded"*|*"quotaExceeded"*|*"Too Many Requests"*|*"429"* \
-    |*"backendError"*|*"500"*|*"502"*|*"503"*|*"Internal error"*|*"unavailable"*)
-      return 0 ;;
-  esac
-  return 1
+  local err
+  err=$(printf '%s\n' "$1" | sed -n '/Error:/,$p' \
+        | grep -vE 'Creation complete|Still (creating|destroying|modifying)|Destruction complete|Modifications complete|Refreshing state' || true)
+  [ -n "$err" ] || return 1
+  printf '%s\n' "$err" | grep -qE \
+    -e 'no such host|dial tcp|connection refused|connection reset' \
+    -e 'i/o timeout|TLS handshake timeout|Client\.Timeout' \
+    -e 'cannot fetch token|unexpected EOF|: EOF|try again' \
+    -e 'rateLimitExceeded|Too Many Requests|backendError|Internal error|Service Unavailable' \
+    -e '(^|[^0-9A-Za-z-])(429|500|502|503|504)([^0-9A-Za-z]|$)'
 }
 
 # _re_tofu_retry <label> <max> <delay> -- <tofu args...>
@@ -477,11 +495,11 @@ re_export_tf_vars() {
       re_require GCP_REGION1; re_require GCP_REGION2
       re_require GCP_INSTANCE_TYPE; re_require GCP_NODE_COUNT
       re_require GCP_NODE_MIN_COUNT; re_require GCP_NODE_MAX_COUNT
-      re_require GCP_INITIAL_NODE_COUNT; re_require GCP_RELEASE_CHANNEL
+      re_require GCP_RELEASE_CHANNEL
       re_require GCP_SUBNET_CIDR1; re_require GCP_SUBNET_CIDR2
       re_require GCP_PODS_CIDR1; re_require GCP_PODS_CIDR2
       re_require GCP_SERVICES_CIDR1; re_require GCP_SERVICES_CIDR2
-      re_require GCP_REDIS_PORTS
+      re_require GCP_REDIS_PORTS; re_require GCP_NODE_SERVICE_ACCOUNT
       [ -n "${RE_OFFLINE:-}" ] || command -v gcloud >/dev/null 2>&1 \
         || re_die "'gcloud' CLI not found (run from the host, not the VM)"
       export TF_VAR_project_id="$GCP_PROJECT_ID"
@@ -491,13 +509,11 @@ re_export_tf_vars() {
       export TF_VAR_node_count="$GCP_NODE_COUNT"
       export TF_VAR_node_min_count="$GCP_NODE_MIN_COUNT"
       export TF_VAR_node_max_count="$GCP_NODE_MAX_COUNT"
-      export TF_VAR_initial_node_count="$GCP_INITIAL_NODE_COUNT"
       export TF_VAR_release_channel="$GCP_RELEASE_CHANNEL"
       re_require GCP_ZONES1; re_require GCP_ZONES2
       # node_locations makes the zone spread explicit rather than GKE's default.
-      re_require GCP_CLUSTER_TIMEOUT; re_require GCP_NODE_POOL_TIMEOUT
+      re_require GCP_CLUSTER_TIMEOUT
       export TF_VAR_cluster_timeout="$GCP_CLUSTER_TIMEOUT"
-      export TF_VAR_node_pool_timeout="$GCP_NODE_POOL_TIMEOUT"
       TF_VAR_zones1="$(re_to_tf_list "$GCP_ZONES1")"; export TF_VAR_zones1
       TF_VAR_zones2="$(re_to_tf_list "$GCP_ZONES2")"; export TF_VAR_zones2
       re_log "GKE: $GCP_NODE_COUNT node(s) PER ZONE x $(re_count_csv "$GCP_ZONES1")/$(re_count_csv "$GCP_ZONES2") zones"
@@ -508,6 +524,7 @@ re_export_tf_vars() {
       export TF_VAR_services_cidr1="$GCP_SERVICES_CIDR1"
       export TF_VAR_services_cidr2="$GCP_SERVICES_CIDR2"
       export TF_VAR_redis_ports="$GCP_REDIS_PORTS"
+      export TF_VAR_node_service_account="$GCP_NODE_SERVICE_ACCOUNT"
       ;;
     *)
       re_die "invalid CLOUD_PROVIDER '$CLOUD_PROVIDER' (expected azure, aws or gcp)"
@@ -641,6 +658,12 @@ re_yaml_dir_init() {
 # order no longer matters (docs/adr/0003).
 #
 # Values come from config.sh; per-cluster ones are passed as KEY=value.
+# _re_sed_escape <value> — make a value safe as a sed REPLACEMENT in s|..|VALUE|:
+# backslash, & (= "the matched text") and the | delimiter are special.
+_re_sed_escape() {
+  printf '%s' "$1" | sed -e 's/[\\|&]/\\&/g'
+}
+
 re_render() {
   local tpl="$1" out="$2"; shift 2
   local src="$TEMPLATES_DIR/$tpl"
@@ -657,14 +680,14 @@ re_render() {
       *)         v="${!k:-}" ;;
     esac
     [ -n "$v" ] || re_die "config.sh: $k is required by $tpl but empty"
-    sed_args+=(-e "s|{{$k}}|$v|g")
+    sed_args+=(-e "s|{{$k}}|$(_re_sed_escape "$v")|g")
   done
 
   # Per-call tokens (REC_NAME, REC_NAME_1/2, B64_*).
   local pair
   for pair in "$@"; do
     k="${pair%%=*}"; v="${pair#*=}"
-    sed_args+=(-e "s|{{$k}}|$v|g")
+    sed_args+=(-e "s|{{$k}}|$(_re_sed_escape "$v")|g")
   done
 
   sed "${sed_args[@]}" "$src" > "$out" || re_die "failed to render $tpl"
@@ -734,17 +757,26 @@ re_k8s_delete_kind() {
     --timeout=30s --ignore-not-found >/dev/null 2>&1 || true
 }
 
-# re_k8s_teardown <ctx> — release everything the cloud would otherwise keep
-# billing, in an order that cannot deadlock.
+# re_k8s_teardown <ctx> [phase] — release everything the cloud would otherwise
+# keep billing, in an order that cannot deadlock.
+#
+# phase "crs"   : webhook + REAADB/REDB/RERC only
+#       "infra" : REC, PVCs, ingress, namespaces
+#       "all"   : both (default)
+# The caller runs "crs" on BOTH clusters before "infra" on either. An RERC can
+# only be finalised while the REC it points at still exists: tearing cluster A
+# down completely before touching cluster B left B's RERCs waiting 60 s on a
+# remote that was already gone (2026-11-25), then force-stripped.
 re_k8s_teardown() {
-  local ctx="$1"
+  local ctx="$1" phase="${2:-all}"
 
   if ! kubectl --context="$ctx" version >/dev/null 2>&1; then
     re_warn "$ctx: unreachable — skipping Kubernetes cleanup"
-    return 0
+    return 3   # 3 = unreachable; the caller decides whether that is a failure
   fi
-  re_log "🧹 $ctx"
+  re_log "🧹 $ctx ($phase)"
 
+  if [ "$phase" != "infra" ]; then
   # 1. The Redis admission webhook, TARGETED. Never `--all`: that would also
   #    delete GKE's own system webhooks (flowcontrol, warden, gmp-operator).
   kubectl --context="$ctx" delete validatingwebhookconfiguration \
@@ -755,6 +787,9 @@ re_k8s_teardown() {
   re_k8s_delete_kind "$ctx" "$NS" reaadb 120
   re_k8s_delete_kind "$ctx" "$NS" redb   60
   re_k8s_delete_kind "$ctx" "$NS" rerc   60
+  fi
+  [ "$phase" = "crs" ] && return 0
+
   re_k8s_delete_kind "$ctx" "$NS" rec    180
 
   # 3. PVCs — this is what releases the GCP persistent disks.
@@ -778,6 +813,57 @@ re_k8s_teardown() {
           >/dev/null 2>&1 || true
     fi
   done
+}
+
+# re_aa_db_password [cluster-context] — print the Active-Active DB password
+# (secret <db>-password, created by step 04). Empty output = no password (e.g.
+# a database created before the password existed, as on the original Azure rig).
+re_aa_db_password() {
+  kubectl --context="${1:-$CLUSTER1}" -n "$NS" get secret "${AA_DB_NAME}-password" \
+    -o jsonpath='{.data.password}' 2>/dev/null | re_b64_decode 2>/dev/null || true
+}
+
+# re_cluster_in_state — does the OpenTofu state still hold a managed K8s cluster?
+# Used by teardown to tell "cluster already gone" (fine) from "cluster exists
+# but kubectl cannot reach it" (PVCs / LoadBalancer would leak).
+# Returns 0 = yes, 1 = no, 2 = cannot tell (state locked / not initialised / tofu missing):
+# the caller must NOT read 2 as "gone".
+re_cluster_in_state() {
+  local out
+  [ -d "$REPO_ROOT/providers/$CLOUD_PROVIDER" ] || return 2
+  out=$( cd "$REPO_ROOT/providers/$CLOUD_PROVIDER" && tofu state list 2>/dev/null ) || return 2
+  printf '%s\n' "$out" | grep -qE 'container_cluster|eks_cluster|kubernetes_cluster'
+}
+
+# re_disable_client_auth <context> <rec> — switch client-certificate enforcement off on the AA database
+# of that cluster, through the REST API inside <rec>-0 (see step 04 and ADR 0011). The password goes
+# through stdin (curl -K -), never on a command line. The peer's instance of the database is created
+# asynchronously and may not exist yet when the REAADB already reports active here, so the look-up is
+# retried (RE_REST_RETRIES x RE_REST_RETRY_DELAY s, default 24 x 5 = 2 min).
+re_disable_client_auth() {
+  local ctx="$1" rec="$2" user pass uid="" code i
+  local tries="${RE_REST_RETRIES:-24}" delay="${RE_REST_RETRY_DELAY:-5}"
+  user=$(kubectl --context="$ctx" -n "$NS" get secret "$rec" -o jsonpath='{.data.username}' \
+           | re_b64_decode) || return 1
+  pass=$(kubectl --context="$ctx" -n "$NS" get secret "$rec" -o jsonpath='{.data.password}' \
+           | re_b64_decode) || return 1
+  for ((i = 1; i <= tries; i++)); do
+    uid=$(printf 'user = "%s:%s"\n' "$user" "$pass" \
+          | kubectl --context="$ctx" -n "$NS" exec -i "$rec-0" -c redis-enterprise-node -- \
+              curl -sk -K - "https://localhost:9443/v1/bdbs?fields=uid,name" 2>/dev/null \
+          | jq -r --arg n "$AA_DB_NAME" '.[] | select(.name==$n) | .uid' 2>/dev/null) || uid=""
+    [ -n "$uid" ] && break
+    [ "$i" -lt "$tries" ] && sleep "$delay"
+  done
+  [ -n "$uid" ] || { re_warn "$rec: database '$AA_DB_NAME' not found through the REST API after $tries attempts"; return 1; }
+  code=$(printf 'user = "%s:%s"\n' "$user" "$pass" \
+        | kubectl --context="$ctx" -n "$NS" exec -i "$rec-0" -c redis-enterprise-node -- \
+            curl -sk -K - -X PUT "https://localhost:9443/v1/bdbs/$uid" \
+              -H 'Content-Type: application/json' \
+              -d '{"enforce_client_authentication":"disabled"}' \
+              -o /dev/null -w '%{http_code}' 2>/dev/null)
+  [ "$code" = "200" ] || { re_warn "$rec: REST PUT returned HTTP ${code:-<none>}"; return 1; }
+  re_log "  ✅ $rec: client certificate no longer required (bdb $uid)"
 }
 
 # re_kube_credentials — load kubeconfig contexts for the selected provider.

@@ -63,94 +63,67 @@ create_dns_zone() {
     --format="value(nameServers)"
 }
 
-# Create DNS A record
+# Create or update a DNS A record (idempotent).
 # Usage: create_dns_record <domain_name> <project_id> <record_name> <ip_address> <ttl>
+# Uses `record-sets create|update` rather than a transaction: a transaction
+# writes transaction.yaml into the cwd, cannot replace a record that holds a
+# DIFFERENT ip, and a failed run leaves the file behind to break the next one.
 create_dns_record() {
   local domain_name="$1"
   local project_id="$2"
   local record_name="$3"
   local ip_address="$4"
   local ttl="${5:-300}"
-  
-  local zone_name=$(get_dns_zone "$domain_name" "$project_id")
-  
+
+  local zone_name
+  zone_name=$(get_dns_zone "$domain_name" "$project_id")
+
   if [ -z "$zone_name" ]; then
     echo "❌ Managed zone not found for $domain_name"
     return 1
   fi
-  
-  echo "📝 Creating DNS record: ${record_name}.${domain_name} -> $ip_address"
-  
-  # Start transaction
-  gcloud dns record-sets transaction start --zone="$zone_name" --project="$project_id"
-  
-  # Delete existing record if it exists (to update it)
-  gcloud dns record-sets transaction remove "$ip_address" \
-    --name="${record_name}.${domain_name}." \
-    --ttl="$ttl" \
-    --type=A \
-    --zone="$zone_name" \
-    --project="$project_id" 2>/dev/null || true
-  
-  # Add new record
-  gcloud dns record-sets transaction add "$ip_address" \
-    --name="${record_name}.${domain_name}." \
-    --ttl="$ttl" \
-    --type=A \
-    --zone="$zone_name" \
-    --project="$project_id"
-  
-  # Execute transaction
-  gcloud dns record-sets transaction execute --zone="$zone_name" --project="$project_id"
-  
-  echo "✅ DNS record created successfully"
+
+  local fqdn="${record_name}.${domain_name}."
+  local verb="create" existing
+  existing=$(gcloud dns record-sets list --zone="$zone_name" --project="$project_id" \
+    --name="$fqdn" --type=A --format="value(rrdatas[0])" 2>/dev/null)
+  [ -n "$existing" ] && verb="update"
+
+  echo "📝 DNS record ($verb): ${fqdn} -> $ip_address"
+  gcloud dns record-sets "$verb" "$fqdn" \
+    --zone="$zone_name" --project="$project_id" \
+    --type=A --ttl="$ttl" --rrdatas="$ip_address" || return 1
+
+  echo "✅ DNS record ${verb}d successfully"
 }
 
-# Delete DNS A record
+# Delete DNS A record (a missing record is not an error).
 # Usage: delete_dns_record <domain_name> <project_id> <record_name>
 delete_dns_record() {
   local domain_name="$1"
   local project_id="$2"
   local record_name="$3"
-  
-  local zone_name=$(get_dns_zone "$domain_name" "$project_id")
-  
+
+  local zone_name
+  zone_name=$(get_dns_zone "$domain_name" "$project_id")
+
   if [ -z "$zone_name" ]; then
     echo "❌ Managed zone not found for $domain_name"
     return 1
   fi
-  
-  echo "🗑️  Deleting DNS record: ${record_name}.${domain_name}"
-  
-  # Get the current record details
-  local record_data=$(gcloud dns record-sets list \
-    --zone="$zone_name" \
-    --project="$project_id" \
-    --filter="name=${record_name}.${domain_name}." \
-    --format="value(rrdatas[0],ttl)" 2>/dev/null)
-  
-  if [ -z "$record_data" ]; then
+
+  local fqdn="${record_name}.${domain_name}."
+  echo "🗑️  Deleting DNS record: ${fqdn}"
+
+  if [ -z "$(gcloud dns record-sets list --zone="$zone_name" --project="$project_id" \
+        --name="$fqdn" --type=A --format="value(name)" 2>/dev/null)" ]; then
     echo "⚠️  Record not found, skipping"
     return 0
   fi
-  
-  local ip_address=$(echo "$record_data" | awk '{print $1}')
-  local ttl=$(echo "$record_data" | awk '{print $2}')
-  
-  # Start transaction
-  gcloud dns record-sets transaction start --zone="$zone_name" --project="$project_id"
-  
-  # Remove record
-  gcloud dns record-sets transaction remove "$ip_address" \
-    --name="${record_name}.${domain_name}." \
-    --ttl="$ttl" \
-    --type=A \
-    --zone="$zone_name" \
-    --project="$project_id"
-  
-  # Execute transaction
-  gcloud dns record-sets transaction execute --zone="$zone_name" --project="$project_id"
-  
+
+  gcloud dns record-sets delete "$fqdn" \
+    --zone="$zone_name" --project="$project_id" --type=A || return 1
+
   echo "✅ DNS record deleted successfully"
 }
 

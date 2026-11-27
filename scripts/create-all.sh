@@ -59,9 +59,18 @@ total=$((SECONDS - overall_start))
 re_log "$(printf '   🔴 %-32s %2dm %02ds' "TOTAL" $((total / 60)) $((total % 60)))"
 re_log "═══════════════════════════════════════════════════════════"
 
-# Give the operator a moment to publish ingress/endpoint data before we read it.
-re_log "Waiting for endpoint data to settle..."
-sleep 10
+# The operator publishes the database ingress (<db>-db.<rec>.<zone>) shortly after
+# the database turns active; step 05 reads it. Poll for it instead of sleeping a
+# fixed 10 s (up to 60 s, usually a couple of seconds).
+re_log "Waiting for the database ingress on both clusters..."
+for _ctx in "$CLUSTER1" "$CLUSTER2"; do
+  for _ in $(seq 1 30); do
+    kubectl --context="$_ctx" get ingress -n "$NS" \
+      -o jsonpath='{range .items[*].spec.rules[*]}{.host}{"\n"}{end}' 2>/dev/null \
+      | grep -q -- '-db\.' && break
+    sleep 2
+  done
+done
 
 bash "$SCRIPT_DIR/05-get-cluster-info.sh"
 

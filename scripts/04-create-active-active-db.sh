@@ -64,3 +64,15 @@ if [ "${state:-}" != "active" ]; then
   re_warn "Collect diagnostics with: ./scripts/get-logs.sh"
   exit 1
 fi
+# --- Client certificates are NOT required (ADR 0010) -------------------------
+# A new AA database is created with enforce_client_authentication=enabled: the
+# TLS handshake then fails ("certificate required") for every client that has no
+# client certificate — redis-cli, redis-py, Flask, the benchmark. Access is
+# protected by TLS + the database password instead. The REAADB CRD has no field
+# for this, so it is set through the REST API of each instance (verified by hand
+# on GCP 2026-11-26: PUT /v1/bdbs/<uid> -> 200, `rladmin info db` -> False).
+# The cluster password goes through stdin (curl -K -), never on a command line.
+# (re_disable_client_auth lives in common/lib.sh: it retries while the peer instance is created)
+re_log "Disabling the client-certificate requirement on both instances"
+re_disable_client_auth "$CLUSTER1" "$REC_NAME1" || exit 1
+re_disable_client_auth "$CLUSTER2" "$REC_NAME2" || exit 1
