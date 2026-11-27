@@ -2,8 +2,11 @@
 
 **Owner:** inline `az network dns` calls in `scripts/02-setup-haproxy.sh`; the `case` block in
 `scripts/delete-all-resources.sh`; `common/dns-aws.sh` (Route53), `common/dns-gcp.sh` (Cloud DNS).
-**Status:** Azure works (inline). **AWS and GCP modules exist and are dead code.** There is no
-`common/dns-azure.sh`.
+**Status (2026-11-27):** GCP ✅ wired and used (step 02 creates, teardown deletes). AWS creates A records only (ELB hostnames need a CNAME — `TODO.md` A8). Azure inline in step 02; there is no `common/dns-azure.sh`.
+
+## Current state (2026-11-27)
+
+`common/dns-gcp.sh` is no longer dead code: step 02 calls `re_dns_upsert` and `delete-all-resources.sh` calls `delete_dns_record` per cluster. The GCP preflight requires a Cloud DNS managed zone for `GCP_DNS_ZONE` and lists the existing zones when it is missing. Public names use short aliases (`RE_ALIAS1/2`, e.g. `<db>-db.rec-a.<zone>`), not the cloud cluster names.
 
 ## Why this exists
 

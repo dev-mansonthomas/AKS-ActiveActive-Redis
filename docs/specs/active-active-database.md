@@ -2,10 +2,15 @@
 
 **Owner:** `scripts/03-setup-rerc.sh`, `scripts/04-create-active-active-db.sh`,
 `scripts/05-get-cluster-info.sh`, `templates/{rerc,rerc-secret,re-aa-db}.yaml`.
-**Status:** works on **Azure via the legacy root scripts** only. In `scripts/` the paths are
-broken; on AWS/GCP unreachable because step 02 never completes.
+**Status (2026-11-27):** ✅ works on GCP, verified by writing on one region and reading on the other.
 
 This is the payload of the whole project: the CRDB spanning two regions.
+
+## Current state (2026-11-27)
+
+- Step 04 waits for the REAADB to become `active`, then **disables client-certificate enforcement** on the database through the REST API (`PUT /v1/bdbs/<uid>`, password via stdin; there is no CRD field and `rladmin tune` refuses). Without it plain TLS clients get *"certificate required"*.
+- The database password is **generated** at deployment (K8s secret); step 05 prints it (`--hide-secrets` opts out), the connection string `rediss://default:<password>@<host>:443` and a ready `redis-cli --insecure --sni <host> -u '…'`. The user is `default`: an empty user gives `WRONGPASS`. Decision: `docs/adr/0011`.
+- The operator's `status.replicationStatus` can stay at `down` while nodes are OK and data replicates (seen after pod kills). Treat it as **advisory**; the write/read test across both regions is the reference (`chaos.sh` health gate).
 
 ## Purpose
 

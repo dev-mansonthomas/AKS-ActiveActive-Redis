@@ -23,7 +23,7 @@ observed behaviour or a doc/code conflict.
 | A3 | ✅ **DONE** — solved structurally, not by patching two lines. `common/lib.sh::re_export_tf_vars` exports **every** `TF_VAR_*` from `config.sh` for all three clouds; used by step 01 and teardown. `scripts/verify-config.sh` proves it credential-free. | ✅ |
 | A4 | ✅ **DONE** — `required_providers` pinned at `azurerm ~> 5.4` and `node_provisioning_profile { mode = "Manual" }` added to both clusters. `tofu validate` passes. | ✅ | Azure is now **last** priority (no access). Note azurerm **5.4.0 is the latest release**, so "update to latest" means fixing the code *forward*, **not** pinning back to `~> 4.26`. See §G. |
 | A5 | ✅ **DONE** — all `variables.tf` now have **0 defaults** (azure 12, aws 12, gcp 19 variables) and every value comes from `config.sh`. Also found and fixed: AWS declared 5 variables it never used (`eks_version`, `node_instance_type`, `node_desired/min/max_size`) while hardcoding 1.29 / t3.xlarge. | ✅ |
-| A6 | Make `scripts/chaos.sh` dispatch to `providers/*/chaos-provider.sh`. | 🟠 | 9 hardcoded `az` calls, zero `CLOUD_PROVIDER` refs; all three `chaos-provider.sh` are dead code. |
+| A6 | **Partially done (2026-11-25).** `scripts/chaos.sh` is now provider-dispatched and CWD-independent: **Azure** (verbatim commands, behaviour unchanged) and **GCP** (`gcloud compute instances reset`; region outage = node pool autoscaling off + resize to 0, restored afterwards). **Untested on both** — no Azure access, GCP not yet run. AWS is not supported. `providers/*/chaos-provider.sh` are still dead code: delete or fold in. | 🟠 | Needs one real chaos run on GCP, and one on Azure when access returns. |
 | A7 | ✅ **DONE** — teardown now sources `common/dns-aws.sh` / `common/dns-gcp.sh` and calls `delete_dns_record` per cluster. Those files were dead code since Phase 2/3. | ✅ |
 | A8 | **Partially done.** `re_ingress_address` now returns `.ip` *or* `.hostname`, so step 02's wait works on EKS. **Still missing:** `common/dns-aws.sh` only creates A records, so a hostname needs CNAME/alias support — `re_dns_upsert` now **fails loudly** on AWS instead of writing a broken record. | 🟠 | Milestone 3 (AWS). |
 | A9 | Remove `TF_VAR_aws_account_id` (declared by no AWS variable) or declare it. | 🔵 | Silently ignored. |
@@ -80,7 +80,7 @@ observed behaviour or a doc/code conflict.
 
 | | Item | Sev | Notes |
 |---|---|---|---|
-| E1 | **Delete the 8 legacy root duplicates** (`01`–`05`, `chaos.sh`, `launch-flask-console.sh`, `recreate.sh`) + root `main.tf`/`variables.tf`/`output.tf` + `scripts/check-tags.sh`; add root wrappers instead. | 🟠 | **Only after A4** — the legacy root Terraform is currently the only Azure config that validates. See ADR 0009. |
+| E1 | **Delete the 8 legacy root duplicates** (`01`–`05`, `chaos.sh`, `recreate.sh`) + root `main.tf`/`variables.tf`/`output.tf` + `scripts/check-tags.sh`; add root wrappers instead. | 🟠 | **Only after A4** — the legacy root Terraform is currently the only Azure config that validates. See ADR 0009. |
 | E2 | **Consolidate the 11 root `*.md` files.** `MULTI_CLOUD_COMPLETE.md`, `PHASE{1,2,3}_COMPLETE.md`, `IMPLEMENTATION_SUMMARY.md`, `MULTI_CLOUD_SUPPORT_PLAN.md`, `EFFORT_ESTIMATION.md`, `README_MULTI_CLOUD.md`, `QUICK_START_GUIDE.md`, `GIT_WORKFLOW.md` (~3,700 lines) are superseded by `docs/`. | 🟠 | They assert a completion that does not exist — actively misleading. Archive under `docs/archive/` or delete; keep `VALIDATION_CHECKLIST.md` (still useful) and `README.md`. |
 | E3 | Fix `README.md`: it documents the **legacy** path and references `cli-cluster{1,2}.sh`, which do not exist (they are `aadb-cli-cluster{1,2}.sh`). | 🟠 | Documented instructions disagree with the intended architecture. |
 | E4 | Sync `config.sh` with `config.example.sh`. | 🟡 | The example is **ahead**: `CLUSTER_RESOURCE_GROUP`, `DNS_RESOURCE_GROUP`, `GCP_CLUSTER_RESOURCE_GROUP`, `NODE_COUNT` are missing from `config.sh`. |
@@ -204,6 +204,22 @@ another project (its `ccvm`/`./demo`), which consumes what this one produces.
 
 ---
 
+## L. Code-review follow-ups (2026-11-25)
+
+Fixed in the same change: teardown pins the cloud account + reloads kubeconfig and counts an unreachable-but-still-existing cluster as a failure (`re_k8s_teardown` rc 3 + `re_cluster_in_state`); `--destroy` runs a minimal preflight and always enforces `CLOUD_PROVIDER == <cloud>-deploy.sh`; `common/dns-gcp.sh` is idempotent (`record-sets create|update|delete`, no `transaction.yaml`); step 03 sets the session timeout with `rladmin` inside the pod instead of `curl -k -u admin:pw`; Flask / `launch_test.sh` / benchmark use the REC name (`rec-a`) and the DB password (`common/appconfig.py`, `re_aa_db_password`). **None of it has run against a real cloud yet.**
+
+| | Item | Sev | Notes |
+|---|---|---|---|
+| L1 | **Azure is unverified after these changes** (no subscription). Re-run create → chaos → destroy when access returns. Azure code paths were kept verbatim or additive (no DB password: `re_aa_db_password` is empty, Flask/benchmark connect without one). | 🟠 | Blocked on access. |
+| L2 | **AWS: no EBS CSI driver / default StorageClass** (`aws_eks_addon` + IAM role missing) → REC PVCs stay Pending. | 🟠 | Deferred until GCP is finished (Milestone 3). Also chaos.sh has no AWS branch. |
+| L3 | ✅ **DONE (2026-11-25)** — only the `Error:` text is classified, HTTP codes matched as whole numbers, `quotaExceeded` and bare `unavailable` removed. Tested on 10 cases (incl. `operation-17004500`). | 🟡 | `common/lib.sh`. |
+| L4 | **Done and applied (2026-11-25).** Nodes run as `GCP_NODE_SERVICE_ACCOUNT`. `./gcp-setup.sh` (host, IAM admin, `--dry-run` first) creates the SA and the bindings from `config.sh` (`GCP_DEPLOYER_ROLES`, `GCP_ADMIN_ACCOUNT`); the 3 commands were run by hand once on the project. Details: `docs/gcp-iam.md`. **Still to prove:** `--plan-only` → deploy with the new SA. | 🟡 | The old demo must be destroyed first: changing the node SA replaces the node pool. |
+| L5 | ✅ **DONE (2026-11-25)** — `_re_sed_escape` escapes `\`, `&`, `|`. Tested with `x&y|z\w`. | 🔵 | Only matters for odd `config.sh` values. |
+| L6 | Step 05 prints secrets by default and `create-all.sh` tees them into `debug/*.log`. Accepted for a few-hours demo; revisit with B1 (print to the TTY only). | 🔵 | Do not share `debug/` or `get-logs.sh --archive` bundles. |
+| L7 | First real `./gcp-deploy.sh --destroy`, then `./check-tags.sh --expect-empty`, to validate the teardown fixes. | 🔴 | The only proof that "one command down" works. |
+
+---
+
 ## Recommended order
 
 Revised to the confirmed priority: **GCP first, AWS second, Azure last** (no Azure access at
@@ -247,3 +263,77 @@ status console **reachable from anywhere**, demo lifetime **2 hours to several w
 **A12** cross-cloud Active-Active (nice-to-have) · **B7** private clusters (rejected — conflicts
 with "from anywhere") · **I1** quota/region finder (wanted, implement later) · section **F**
 feature backlog.
+
+## M. Client access to the AA database (found 2026-11-25, GCP) — BLOCKER for load tests
+
+The deployed `aadb` rejects every client without a TLS client certificate:
+`rladmin info db aadb` → `enforce_client_authentication: True`; `openssl s_client` →
+`alert certificate required` (116). This breaks `redis-cli` AND the Python clients
+(`flask/app.py`, `incr_key.py`, `redis_connectivity_benchmark.py`: `ssl_cert_reqs=None`, no client cert).
+Contradicts ADR 0010 (password + TLS, no client certs to distribute).
+
+Established facts:
+- Routing/passthrough is fine. The ingress works **only if the client sends SNI**
+  (`redis-cli --sni <db-host>`); without SNI HAProxy falls back to the API backend (HTTP reply, "got H").
+- The REAADB CRD has **no** `enforceClientAuthentication` field (checked with `kubectl explain`);
+  only `tlsMode` (disabled/enabled/replica_ssl) and `clientAuthenticationCertificates`.
+  `tlsMode: disabled` is not an option (SNI passthrough needs TLS end to end).
+- `rladmin tune db aadb enforce_client_authentication disabled` → `invalid token`.
+
+To do:
+- [x] M1. (DONE 2026-11-26: PUT /v1/bdbs/<uid> -> HTTP 200 on both instances, `rladmin info db` -> False.) Try the REST route (`PUT /v1/bdbs/<uid> {"enforce_client_authentication":"disabled"}` from inside
+      `rec-*-0`, with the real cluster password; the first attempt used a placeholder, so it is UNTESTED).
+      For an AA DB it may need `crdb-cli crdb update --default-db-config` instead.
+- [ ] M2. Else try `clientAuthenticationCertificates` with a generated client cert and ship it to the clients.
+- [x] M3. (DONE 2026-11-27: coded in step 04 `re_disable_client_auth`, a fresh deploy gave a working `redis-cli` with no manual step; the operator did not revert it.) Automate the working fix in step 04 (after `aadb` is active, both clusters); confirm the operator
+      does not revert it on reconcile.
+- [x] M4. (DONE; README rewritten 2026-11-27.) Step 05 now prints the working command: `redis-cli --insecure --sni <h> -u rediss://default:<pw>@<h>:443`.
+      NOT `rediss://:<pw>@...` (WRONGPASS with redis-cli 8.8.0; `default:` works). AA replication A->B verified 2026-11-26. README still to do (doc-sync).
+- [~] M5. `scripts/chaos.sh` validated on GCP 2026-11-27 (O3). Still to re-test on GCP: `launch_test.sh`, `redis_connectivity_benchmark.py`, `incr_key.py`.
+
+## N. Speed (measured 2026-11-25 on GCP: deploy 13m15, destroy 14m38)
+
+Deploy: preflight 1m, step 01 (tofu) 8m, step 02 4m, steps 03+04 43s.
+
+Done 2026-11-26. Deploy re-measured 2026-11-27: **≈13 min** (08:53 → 09:06, unchanged: the inline pool and the parallel step 02 gained less than estimated). Destroy NOT re-measured:
+- [x] N1. GKE node pool declared INSIDE `google_container_cluster` (was: default pool created, deleted ~1m38,
+      then our pool created ~1m30, per cluster). Removed vars `initial_node_count`, `node_pool_timeout`
+      (and `GCP_INITIAL_NODE_COUNT`, `GCP_NODE_POOL_TIMEOUT`); `GCP_CLUSTER_TIMEOUT` raised to 90m.
+- [x] N2. Step 02 per-cluster work extracted to `scripts/02a-setup-cluster.sh`, run for both clusters in
+      parallel, one log each (`debug/02a-setup-<rec>-*.log`).
+- [x] N3. `sleep 10` before step 05 replaced by a poll on the database ingress.
+- [x] N4. Preflight: `kubectl version` contacted the current cluster (31 s timeout on a stale context);
+      now `kubectl version --client`. Remaining preflight cost: ~9 s name-collision check, ~3 s per API/region check.
+
+To do — DESTROY (14m38):
+- [ ] N5. (Superseded by N1) The separate node-pool deletion (2m40 in the 2026-11-25 destroy) disappears now that the
+      pool is inline: deleting the cluster deletes it. Re-measure the destroy after the next cycle first.
+- [ ] N6. K8s teardown (`re_k8s_teardown`, ~3 min) runs cluster after cluster: run phase `crs` on both,
+      then phase `infra` on both in parallel (one log each), keeping the RERC-before-REC ordering.
+- [ ] N7. Measure the first-deploy gap: image pulls on the 3 nodes (REC Running takes ~2 min).
+
+## O. Chaos console (spec `docs/specs/chaos-webui.md`, brief `docs/product/brief.md`)
+
+Done 2026-11-26/27 (tests: `./tests/run.sh`; validated on real GCP clusters 2026-11-27):
+- [x] O1. Slice 1: quiet launcher/stop (`chaos-webui-*.sh`), localhost only, `debug=False`, logs in `debug/`.
+- [x] O2. Slice 2: event channel + scenario banner + timeline; `chaos.sh --list/--scenario/--check-only/--no-prompt`,
+      `region-recover`, health gate on both clusters, EXIT trap -> `ABORTED`.
+- [x] O3. **Host validation DONE 2026-11-27** on GCP: `--check-only`, `pod` (51 s), `node` (270 s), `region` (427 s recovery, outage verified at 0 nodes), `region-recover` (173 s). Not yet validated: a full `pod,node,region` in ONE run with the final code; Azure.
+- [ ] O4. Slice 3: Redis skin (`redis-brand-ui` / `redis-product-ui`) for 1800x1169 screen sharing, no CDN jQuery,
+      mock-data mode so the page can be built and screenshotted without clusters.
+- [x] O5a. Cluster primary shown per cluster (`/v1/nodes/status` role+hostname; the REST API says master/slave, the page says primary/replica), node roles and primary/replica shards. Not shown yet: the endpoint holder (needs `/v1/endpoints`, to verify).
+- [ ] O5. Slice 4: indicators — RE nodes OK/total, K8s nodes Ready, REC pods Ready, per-region latency,
+      replication lag/status from the REC REST API (`crdt_sources[].lag/status`), ops/s if cheap.
+- [ ] O6. Fill `typical` durations in `flask/scenarios.py` after the first real runs.
+- [ ] O7. Collapse the duplicated headline/scenario title in the banner; hide the data cards while a run is on?
+
+Added 2026-11-27 (audit trail, health gate and what the first real runs taught):
+- [x] O8. Audit trail: `debug/chaos-<ts>.log` + `.events.jsonl`, timed commands, state samples, richer snapshots, `RESULT` line (spec slice 2c).
+- [x] O9. Health gate checks the cloud login first (`gcloud auth login <account>` hint); `node`/`region`/`region-recover` re-check it before touching the cloud.
+- [x] O10. `region` injection verified against Kubernetes (0 nodes); the old instance wait matched no VM name and passed at once. GCE instances are found by label `goog-k8s-cluster-name`. A failed injection restores the pool (size + autoscaling).
+- [ ] O11. **Unproven:** the 60 s `CHAOS_AUTOSCALER_SETTLE` before the resize. Before it, pods left Pending by the drain triggered `TriggeredScaleUp` and the pool regrew (nodes replaced, not removed). One passing run since; if it regresses, read the `cluster-autoscaler status` snapshot.
+- [ ] O12. `--no-prompt` leaves the region down for only a few seconds: add a hold (`CHAOS_OUTAGE_HOLD`) if unattended runs must exercise the outage longer.
+- [ ] O13. Unexplained replication delay A→B: 23 s after `pod`, 41 s after `node`, 1 s after `region`. Watch the console's sync-link lag during the next runs.
+- [ ] O14. Operator `status.replicationStatus` stuck at `down` while `rladmin` and the data path are fine (seen 2026-11-26 after pod kills, once more 2026-11-27): root cause unknown; the gate treats it as a warning.
+- [ ] O15. Merge the two `rladmin` calls of `rec_health_line` (≈ 2–3 s per probe); optional `--reset-roles` to place the cluster primary deterministically (`rladmin cluster master set`, untested).
+- [ ] O16. Azure: re-run `pod`, `node`, `region` (L1) and AWS support (A6).

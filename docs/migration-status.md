@@ -1,5 +1,9 @@
 # Documentation migration status
 
+> **Historical (2026-09-04).** This describes the first documentation migration. Several statements
+> below (GCP cannot apply, scripts unrunnable, dead DNS code, no tests) are no longer true; current
+> state: `CLAUDE.md` §2, `README.md` and `docs/TODO.md`.
+
 **Date:** 2026-09-04 · **Branch:** `aws_gcp_support` @ `3e7b638` (5 commits ahead of `main`,
 unmerged) · **Nothing was committed** as part of this migration.
 

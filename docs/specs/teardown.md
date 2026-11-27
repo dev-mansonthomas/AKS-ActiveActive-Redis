@@ -2,8 +2,14 @@
 
 **Owner:** `scripts/delete-all-resources.sh`, root wrapper `delete-all-resources.sh`,
 `scripts/recreate.sh`.
-**Status:** provider-aware structure in place; **GCP teardown fails**, AWS/GCP DNS cleanup is
-explicitly unimplemented.
+**Status (2026-11-27):** ✅ works on GCP (≈ 14m38 measured). AWS/Azure teardown not re-run.
+
+## Current state (2026-11-27)
+
+- Order matters: on **both** clusters the custom resources go first (`re_k8s_teardown <ctx> crs`: REAADB, then RERC, then REC), and only then the infrastructure (`infra`: namespaces, Helm release) and `tofu destroy`. Deleting the RERC of one cluster while the other still referenced it left objects stuck.
+- Kubernetes teardown is sequential; parallelising it is `TODO.md` N6.
+- GKE node pools can take up to an hour to delete on GCP's side (`GCP_CLUSTER_TIMEOUT`).
+- Verify afterwards with `./check-tags.sh` (also sweeps by name through Cloud Asset on GCP).
 
 ## Purpose
 

@@ -1,6 +1,6 @@
 # Deployment — host-side entry points
 
-**One script per cloud, at the repository root. Run these on the host, never in the VM** —
+**One script per cloud, at the repository root (plus, once per GCP project, `./gcp-setup.sh` for IAM and APIs — see `gcp-iam.md`). Run these on the host, never in the VM** —
 they need cloud credentials, which the VM deliberately does not have.
 
 ```bash
@@ -35,7 +35,7 @@ Exit codes: `0` success · `1` failure · `2` bad usage.
      credentials: `gcloud auth login` fixes one, `gcloud auth application-default login` the
      other, and switching the CLI account does not switch ADC
    - the project/subscription/account is reachable
-   - required APIs are enabled (GCP: `container`, `compute`, `dns`) — blocking
+   - required APIs are enabled (GCP: `container`, `compute`, `dns`) — blocking; `./gcp-setup.sh` enables them
    - **optional** API `cloudasset` — if absent, it offers to enable it and
      **never blocks**. It powers the only audit sweep that does not depend on
      our naming convention, which matters because GCP cannot label networks,
@@ -94,10 +94,11 @@ There is no `deploy.env`: **all configuration lives in `config.sh`** (copy it fr
 
 ## Status
 
-| Cloud | State |
+| Cloud | State (2026-11-27) |
 |---|---|
-| **GCP** | Pipeline complete and validated credential-side. **Never yet run against a real project** — the first `--plan-only` is the outstanding gate (`TODO.md` A10). |
-| **AWS** | Provisioning validates, but DNS is incomplete: `common/dns-aws.sh` writes A records while ELBs publish a hostname (needs CNAME/alias). The preflight warns, and the run stops with a clear error (`TODO.md` A8). |
-| **Azure** | Validates on `azurerm 5.4.0`. Untested — no Azure access at present. |
+| **GCP** | ✅ Run end to end on a real project: deploy ≈ 13 min, destroy ≈ 15 min, chaos scenarios validated. |
+| **AWS** | Provisioning validates, never applied. DNS is incomplete: `common/dns-aws.sh` writes A records while ELBs publish a hostname (needs CNAME) and the EBS CSI driver is missing (`TODO.md` A8, milestone 3). |
+| **Azure** | Worked before the rework; not re-verified (no Azure access). |
 
-`--plan-only` is safe on all three.
+`--plan-only` is safe on all three. After a deploy, `./scripts/chaos.sh --check-only` is the quickest proof that
+both clusters and the Active-Active database are healthy.

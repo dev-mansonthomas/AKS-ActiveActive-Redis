@@ -53,16 +53,17 @@ Dashed = designed but **never wired up**.
 ```mermaid
 graph LR
     C["config.sh"] --> S1["01 create-cluster<br/>✅ provider-aware"]
-    S1 --> AZ["azure/ AKS<br/>⚠ fails tofu validate"]
-    S1 --> AW["aws/ EKS<br/>✅ validates, never applied"]
-    S1 --> GC["gcp/ GKE<br/>❌ apply impossible"]
-    S1 --> S2["02 setup-haproxy<br/>❌ hardcoded 'az'<br/>❌ aborts: cat config.sh"]
-    S2 --> X["steps 03/04/05<br/>unreachable"]
-    DEAD["DEAD CODE:<br/>common/dns-aws.sh<br/>common/dns-gcp.sh<br/>providers/*/chaos-provider.sh"]
+    S1 --> AZ["azure/ AKS<br/>⚠ validates, not re-verified"]
+    S1 --> AW["aws/ EKS<br/>⚠ validates, never applied"]
+    S1 --> GC["gcp/ GKE<br/>✅ applied and destroyed"]
+    S1 --> S2["02 setup-haproxy<br/>→ 02a per cluster, in parallel"]
+    S2 --> X["03 RERC → 04 AA DB → 05 info<br/>✅ on GCP"]
+    DEAD["UNUSED:<br/>providers/*/chaos-provider.sh"]
 
-    style S2 fill:#fdd,stroke:#c00
-    style GC fill:#fdd,stroke:#c00
+    style S2 fill:#dfd,stroke:#090
+    style GC fill:#dfd,stroke:#090
     style AZ fill:#ffd,stroke:#c90
+    style AW fill:#ffd,stroke:#c90
     style DEAD fill:#eee,stroke:#999,stroke-dasharray: 5 5
 ```
 
@@ -184,9 +185,8 @@ apply -auto-approve`, then `./get-credentials.sh`.
   copies** of the legacy root files with no `terraform{}` block; azurerm resolves to 5.4.0,
   which requires a `node_provisioning_profile` block. The legacy root path survives only via
   its committed `.terraform.lock.hcl` pinning azurerm **4.26.0**.
-- **GCP cannot apply**: `project_id` has no default and step 01 never exports
-  `TF_VAR_project_id` (it only runs `gcloud config set project`) → *"No value for required
-  variable"*.
+- **GCP applies** (fixed 2026-09: `TF_VAR_project_id` and all variables are exported from
+  `config.sh`; validated on a real project 2026-11-25).
 - AWS/GCP pins (`~> 5.0`) are themselves behind current majors — confirm via Context7 before bumping.
 
 ### 5.3 Orchestration — `scripts/`
@@ -200,7 +200,7 @@ apply -auto-approve`, then `./get-credentials.sh`.
 | `05-get-cluster-info.sh` | n/a | hardcodes `-n rec`; `SC2207` array split |
 | `create-all.sh` | passes through | orchestrates 01→04, times each, then 05 |
 | `delete-all-resources.sh` | **yes** (4 refs) | provider-aware teardown |
-| `chaos.sh` | **no** — 9 hardcoded `az` calls | Azure only |
+| `chaos.sh` | **yes** — `provider_*` functions per cloud | GCP ✅ validated, Azure kept verbatim, AWS refused |
 | `check-tags-{azure,aws,gcp}.sh` | per-cloud | **all three implemented** |
 | `check-tags.sh` | — | stale Azure-only duplicate of the root dispatcher |
 
@@ -216,7 +216,7 @@ Phase 1 moved the pipeline into `scripts/` but **did not delete the originals**:
 - **Wrappers / dispatchers (current):** `create-all.sh`, `delete-all-resources.sh`,
   `check-tags.sh` — these delegate into `scripts/`.
 - **Legacy Azure-only duplicates (stale, still tracked):** `01`–`05`, `chaos.sh`,
-  `launch-flask-console.sh`, `recreate.sh`, plus root `main.tf`/`variables.tf`/`output.tf`.
+  `recreate.sh`, plus root `main.tf`/`variables.tf`/`output.tf`.
 
 `README.md` documents the **legacy** path — which is, ironically, the only one that works.
 Root `main.tf` and `providers/azure/main.tf` are byte-identical.
@@ -250,6 +250,21 @@ fails. Step 02's `rm ./yaml/*.yaml` also fails on an empty dir — fatal under `
   `loadgen.yaml`), `continuous_load_v2/memtier_benchmark.yml`.
 
 > ⚠ `README.md` references `cli-cluster{1,2}.sh`; the files are `aadb-cli-cluster{1,2}.sh`.
+
+### 5.7 Chaos console (Flask) and event channel
+
+```
+scripts/chaos.sh ──POST /api/chaos/event──▶ flask/app.py (127.0.0.1:5050) ◀── browser polls /api/chaos/state (1 s)
+  health gate, phases pod|node|region|region-recover      │                    + /redis/<r>, /redisha, /cluster/<r>
+  chaos_notify (common/chaos-notify.sh, best effort)      └─ ChaosState (memory, last run only)
+```
+Events: `run_start`, `phase_start` (sent *before* the "Press Enter" prompt: the page shows "Ready — waiting
+for the presenter"), `inject` (timer origin, carries the exact action), `step` (every `record()` of chaos.sh),
+`phase_end`, `run_end` (an EXIT trap sends `ABORTED` if chaos.sh is interrupted). Data sources are polled
+by the page, one sequential loop per source, ≤ 1 request/s per source during a run, every 10 s otherwise;
+every route answers within 4 s even if a region is dead (`/aadb/<r>` returns the Active-Active database status and sync links from the REST API, whitelisted fields only). Contract: `docs/specs/chaos-webui.md`.
+
+**Audit trail.** Next to the human log `debug/chaos-<ts>.log`, `chaos.sh` writes `debug/chaos-<ts>.events.jsonl`: the same events the console receives (via the `chaos_notify_hook`) plus command start/end, state samples and snapshots. The region outage is *verified against Kubernetes* (0 nodes), not assumed from the cloud CLI (`docs/adr/0013`).
 
 ## 6. Redis data model
 

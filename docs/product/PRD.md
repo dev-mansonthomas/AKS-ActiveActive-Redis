@@ -97,30 +97,24 @@ cloud is the demo.
 - **Provider-aware provisioning and teardown** — `scripts/01-create-cluster.sh` and
   `scripts/delete-all-resources.sh` both dispatch on `CLOUD_PROVIDER`.
 
-### 4.2 In scope but NOT delivered
+### 4.2 In scope but not (yet) delivered
 
-Despite `MULTI_CLOUD_COMPLETE.md` asserting "ALL 3 PHASES COMPLETE" and "production-ready":
+State on **2026-11-27** (the 2026-09 list of Azure-only steps, an unrunnable pipeline, a GCP that
+could not apply and dead DNS code is resolved — see `docs/TODO.md` A1–A8):
 
-- **Steps 02–05 are Azure-hardcoded.** Step 02 calls `az aks get-credentials` and
-  `az network dns record-set` directly. With `CLOUD_PROVIDER=aws` you get EKS clusters and then
-  the pipeline stops. **No Active-Active database can be created on AWS or GCP.**
-- **The `scripts/` pipeline cannot run at all** — the working-directory contract is
-  self-contradictory (`source ../config.sh` vs `templates/`, `yaml/`, `cat config.sh`). Step 02
-  aborts on line 39. This affects Azure too.
-- **GCP cannot even provision** — `project_id` is declared without a default and never exported
-  as `TF_VAR_project_id`; `tofu apply` fails with *"No value for required variable"*.
-- **`providers/azure` fails `tofu validate`** — no `required_providers` pin, so azurerm floats
-  to v5.x and the config is invalid against it.
-- **Regions and instance types from `config.sh` are never passed to Terraform** — no
-  `TF_VAR_region1`/`region2`/instance-type exports. Terraform silently uses its own defaults,
-  which disagree with `config.sh` on AWS and GCP.
-- **DNS automation for AWS/GCP is dead code** — `common/dns-aws.sh` (Route53) and
-  `common/dns-gcp.sh` (Cloud DNS) exist and are never invoked by anything.
-- **Chaos engineering is Azure-only** — `scripts/chaos.sh` has 9 hardcoded `az` calls and never
-  reads `CLOUD_PROVIDER`; all three `providers/*/chaos-provider.sh` are dead code.
-- **Cross-cloud Active-Active** (e.g. AKS ↔ EKS) — the headline differentiator — was never
-  designed. `config.sh` has a single `CLOUD_PROVIDER`, so one run cannot span two clouds.
-- **Nothing was validated.** `VALIDATION_CHECKLIST.md`: 183 unchecked boxes, 0 checked.
+- **GCP is delivered and exercised**: one command up (≈13 min), one command down (≈15 min), four
+  chaos scenarios (`pod`, `node`, `region`, `region-recover`) validated on real clusters, a
+  health-gated harness with an audit trail, and the chaos web console (`docs/product/brief.md`,
+  `docs/specs/chaos-webui.md`).
+- **AWS**: provisioning validates, never applied. Missing: CNAME for ELB hostnames
+  (`common/dns-aws.sh` writes A records), EBS CSI driver, chaos support (`TODO.md` A8, milestone 3).
+- **Azure**: worked before the rework; **not re-verified** (no access at present). Azure-specific
+  commands in `chaos.sh` were kept verbatim.
+- **No CI**: a credential-free suite exists (`./tests/run.sh`: pytest, node, shell with stubs,
+  shellcheck, ruff) but nothing runs it automatically (`TODO.md` D).
+- **Cross-cloud Active-Active** (e.g. AKS ↔ EKS) was never designed and is a nice-to-have
+  (`config.sh` has a single `CLOUD_PROVIDER`).
+- Open question for the chaos demo: replication delay of 23–41 s seen after `pod`/`node` (unexplained).
 
 ### 4.3 Out of scope
 

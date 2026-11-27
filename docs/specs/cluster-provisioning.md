@@ -2,8 +2,16 @@
 
 **Owner:** `scripts/01-create-cluster.sh`, `providers/{azure,aws,gcp}/{main,variables,outputs}.tf`,
 `providers/*/get-credentials.sh`. Legacy equivalent: root `01-create-cluster.sh` + root `main.tf`.
-**Status:** Azure works via the **legacy root path** only; AWS validates but was never applied;
-GCP cannot apply.
+**Status (2026-11-27):** GCP ✅ applied and destroyed repeatedly on a real project; AWS validates, never applied; Azure not re-verified since the rework (no access).
+
+## Current state (2026-11-27, supersedes the "Known defects" below where they conflict)
+
+- **GCP works.** `TF_VAR_project_id` and every other variable come from `config.sh` through `re_export_tf_vars`; the old D2 ("GCP cannot apply") no longer holds.
+- **Node pool is declared inside `google_container_cluster`** (`node_pool {}` per region). A separate `google_container_node_pool` needs the default pool created then deleted first (≈1m40) and a second creation (≈1m30). The gain turned out smaller than estimated; destroy time with the inline pool is still to be measured (`TODO.md` N5).
+- Regional clusters with explicit `node_locations` (3 zones, `GCP_NODE_COUNT` is **per zone**); autoscaling `GCP_NODE_MIN_COUNT..MAX_COUNT`.
+- Nodes run as a dedicated least-privilege service account (`GCP_NODE_SERVICE_ACCOUNT`, `docs/gcp-iam.md`); the deploy identity may only `actAs` that account.
+- `GCP_CLUSTER_TIMEOUT` (default config `90m`): GKE node-pool operations regularly exceed the provider's 40 min default.
+- Measured 2026-11-25..27: whole deploy ≈ 13 min, of which cluster creation ≈ 4–5 min.
 
 ## Purpose
 

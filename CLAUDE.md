@@ -21,34 +21,26 @@ create-and-destroy demo environment (see `skip_deletion` tagging).
 
 **Audience:** Redis Solution Architects running customer demos and HA/DR proofs.
 
-- Human getting-started guide → `README.md` (Azure path; currently the only working path)
+- Human getting-started guide → `README.md` (common part + one section per cloud: GCP, AWS, Azure)
 - Agent docs → `docs/` (`product/PRD.md`, `architecture/overview.md`, `specs/`, `adr/`, `TODO.md`)
 - **Start here for current state → `docs/migration-status.md` and `docs/TODO.md`**
 
 ## 2. Status — read this before trusting any other doc
 
-Branch `aws_gcp_support` (5 unmerged commits, all 2026-05-04) added AWS and GCP support.
-Ten root-level `*.md` files from that effort (`MULTI_CLOUD_COMPLETE.md`,
-`PHASE{1,2,3}_COMPLETE.md`, …) declared the work **"COMPLETE"** and **"production-ready"**; they
-are now archived under **`docs/archive/`** with a warning banner.
+Branch `aws_gcp_support`. The root-level `*_COMPLETE.md` files from the first multi-cloud effort
+(2026-05) claimed everything was "production-ready"; they were aspirational and are archived under
+`docs/archive/`. **State as of 2026-11-27, verified by running it:**
 
-**Verified against the code, that is false.** Multi-cloud is roughly **40% done**:
-
-| Layer | Azure | AWS | GCP |
+| Layer | GCP | AWS | Azure |
 |---|---|---|---|
-| Cluster provisioning (Terraform) | works (legacy root path only) | validates, never applied | **cannot apply** (`project_id` unwired) |
-| `get-credentials.sh` | present | present | present |
-| Steps 02–05 (ingress, operator, REC, RERC, AA DB) | **Azure-hardcoded** | **absent** | **absent** |
-| Chaos harness | Azure-hardcoded | dead code | dead code |
-| DNS automation | inline `az` in step 02 | dead code | dead code |
-| Tag compliance check | works | works | works |
+| Cluster provisioning (OpenTofu) | ✅ applied and destroyed repeatedly (deploy ≈13 min, destroy ≈15 min) | validates, never applied | worked before the rework, **not re-verified** (no access) |
+| Steps 01–05 (ingress, operator, REC, RERC, AA DB, client access) | ✅ | not run (EBS CSI, DNS CNAME for ELB hostnames missing) | shared code, not re-verified |
+| Chaos harness (`scripts/chaos.sh`) | ✅ `pod`, `node`, `region`, `region-recover` run on real clusters | unsupported | Azure commands kept verbatim, not re-verified |
+| DNS automation | ✅ `common/dns-gcp.sh` | `common/dns-aws.sh` writes A records only | inline `az` in step 02 |
+| Chaos console + tests | ✅ `./tests/run.sh` (no cloud needed) | — | — |
 
-`VALIDATION_CHECKLIST.md` contains **183 unchecked boxes and 0 checked** — nothing in the
-multi-cloud effort was ever executed. `terraform.tfstate.backup` only ever contained Azure
-resources. Treat the `*_COMPLETE.md` files as **aspirational plans, not status**.
-
-The Active-Active database — the actual point of the project — **can only be created on
-Azure**, and only via the legacy root scripts. Details: `docs/migration-status.md`.
+Still dead code: the three `providers/*/chaos-provider.sh` (`chaos.sh` has its own per-provider
+functions). Azure and AWS verification is the outstanding work (`docs/TODO.md`, milestones 3–4).
 
 ### Current priorities (set 2026-09-04)
 
@@ -87,7 +79,7 @@ There is **no `package.json`, no PHP, no MySQL, no Angular, and no Lua** in this
 
 ### Verification gates (credential-free, runnable in the VM)
 
-There is no test suite yet. These gates all run in the VM, without cloud credentials:
+`./tests/run.sh` runs the whole credential-free suite (see below). These gates also run in the VM:
 
 ```bash
 # 0. config.sh drives Terraform completely? (per provider, no cloud CLI needed)
@@ -145,9 +137,9 @@ availability, the DNS zone, `config.sh` completeness and `tofu validate` all pas
 `scripts/create-all.sh` / `scripts/delete-all-resources.sh` still work directly, but the
 `*-deploy.sh` scripts are the supported path — they add the preflight and confirmation.
 
-The pipeline is now provider-agnostic and CWD-independent, but **it has never been run against
-a real cloud** — everything below the credential boundary is verified, nothing above it is.
-The first `tofu plan`/`apply` on GCP from the host is the outstanding gate (`docs/TODO.md` A10).
+The pipeline is provider-agnostic and CWD-independent. **GCP has been run end to end on a real
+project** (2026-11-25 → 27); AWS and Azure have not been run since the rework (`docs/TODO.md` A10).
+One-time GCP project setup (IAM, APIs) is `./gcp-setup.sh` (`docs/gcp-iam.md`).
 
 The **legacy root scripts** (`./01-create-cluster.sh` … `./04-create-active-active-db.sh`; the legacy `05-get-cluster-info.sh` was deleted) are stale
 Azure-only duplicates, superseded by `scripts/`. See `docs/adr/0009`; they are slated for
@@ -205,30 +197,39 @@ fail with a confusing permission error. The wrapper exports the same account, an
 ### Demo console and load tests
 
 ```bash
-./launch-flask-console.sh                       # Flask console; reads ../config.sh, so runs from flask/
+./chaos-webui-start.sh                          # chaos console on http://127.0.0.1:5050/ (quiet; logs in debug/)
+./chaos-webui-stop.sh                           # stop it
 cd redis-enterprise-testing && ./install-python-reqs-for-test.sh
 ./launch_test.sh                                # latency/consistency across both regions
-cd .. && ./chaos.sh                             # HA harness — Azure only
+cd .. && ./scripts/chaos.sh --check-only        # health gate of BOTH clusters, injects nothing
+./scripts/chaos.sh --list                       # scenarios: pod node region region-recover
+./scripts/chaos.sh [--no-prompt] [--scenario node,pod] [--pod 0] [<cluster>]   # GCP and Azure; AWS unsupported
+                                                # victim pod = a node that is neither the cluster primary nor the endpoint holder (rladmin), --pod to force (0 = primary, worst case)
+./tests/run.sh                                  # pytest + node --test + shell tests + shellcheck + ruff (no cloud)
 ```
 
 ## 5. Module map
 
 | Path | Responsibility |
 |---|---|
-| `scripts/01..05-*.sh` | The deployment pipeline. **Intended** multi-cloud home. Only `01` is provider-aware. |
+| `scripts/01..05-*.sh`, `02a-setup-cluster.sh` | The deployment pipeline (provider-agnostic; `02a` installs one cluster, two run in parallel from `02`). |
 | `scripts/create-all.sh` | Runs 01→04, times each step, then 05. |
 | `scripts/delete-all-resources.sh` | Provider-aware teardown. |
 | `scripts/check-tags-{azure,aws,gcp}.sh` | Per-cloud tag/label compliance checks. Sourced by root `check-tags.sh`. |
-| `scripts/chaos.sh` | Node/cluster outage harness. **Azure-hardcoded.** |
+| `scripts/chaos.sh` | Chaos harness, provider-dispatched (GCP, Azure; AWS unsupported). Health gate on both clusters (cloud login first), scenarios `pod`/`node`/`region`/`region-recover`, `--no-prompt`, outage verified by observation, audit trail `debug/chaos-<ts>.log` + `.events.jsonl`, notifies the console. Spec: `docs/specs/chaos-webui.md`. |
+| `common/chaos-notify.sh` | `chaos_notify`: best-effort events to the chaos console (never fails or blocks the run). |
+| `chaos-webui-start.sh`, `chaos-webui-stop.sh` | Quiet start/stop of the Flask chaos console (pid + logs in `debug/`). |
+| `tests/` | `run.sh` (all groups), `shell/` (launcher, notify, chaos.sh with stubbed kubectl/gcloud/curl). Python tests: `flask/tests/`, JS: `flask/tests/js/`. |
 | `providers/{azure,aws,gcp}/main.tf` | Per-cloud cluster provisioning (AKS / EKS+VPC+IAM / GKE+VPC). |
 | `providers/*/get-credentials.sh` | Writes kubeconfig contexts named `redis-<region>`. Called by `scripts/01`. |
 | `providers/*/chaos-provider.sh` | Per-cloud node kill/scale primitives. **DEAD CODE** — nothing calls these. |
-| `common/dns-{aws,gcp}.sh` | Route53 / Cloud DNS record management. **DEAD CODE** — nothing calls these. |
+| `common/dns-{aws,gcp}.sh` | Route53 / Cloud DNS record management, used by step 02 and teardown (`re_dns_upsert`). AWS writes A records only (ELB hostnames need CNAME — TODO A8). |
 | `templates/*.yaml` | `sed`-token templates: `rec`, `rerc`, `rerc-secret`, `re-aa-db`, `webhook`, haproxy values. |
 | `yaml/` | Generated manifests. **Gitignored**, must exist as a directory. |
-| `flask/` | Flask demo console (`app.py`, `k8s.py`) showing per-region read/write. |
+| `flask/` | Chaos console: `app.py` (routes, localhost only), `chaos_api.py` (`/api/chaos/event|state`, `/api/health`), `chaos_state.py`, `scenarios.py` (texts), `static/chaos.js` (page logic), `templates/index.html`. |
 | `redis-enterprise-testing/` | Load generators, latency benchmark, Redis UI/CLI shortcuts, standalone-DB scaling demos. |
 | `redis-enterprise-testing/continuous_load/` | Dockerised load generator deployed into K8s. |
+| `gcp-setup.sh` (root) | One-off IAM/API setup of a GCP project, run by an IAM admin (never the deploy identity). `--dry-run` first. See `docs/gcp-iam.md`. |
 | `{gcp,aws,azure}-deploy.sh` (root) | **Host-side entry points — the supported way to run this.** Preflight → confirm → deploy/destroy. `--destroy`, `--plan-only`. Shared body in `common/deploy-lib.sh`. |
 | `common/lib.sh` | Shared library: `REPO_ROOT`, `re_load_config`, logging into `debug/`, `re_export_tf_vars`, `re_ns_ensure`, `re_dns_upsert`, `re_ingress_address`. **Source this first in any new script.** |
 | `scripts/verify-config.sh` | Proves `config.sh` satisfies every Terraform variable, credential-free. |
@@ -237,7 +238,7 @@ cd .. && ./chaos.sh                             # HA harness — Azure only
 | `scripts/rladmin.sh` | Run `rladmin` (RE cluster CLI) on either cluster; `--both`, `--shell`. |
 | `debug/` | Deployment logs + diagnostic bundles. **Gitignored.** |
 | `main.tf`, `variables.tf`, `output.tf` (root) | **Legacy Azure-only** Terraform. Still the only path with a working provider lock. |
-| `01..05`, `chaos.sh`, `recreate.sh`, `launch-flask-console.sh` (root) | **Legacy Azure-only duplicates** of `scripts/` — kept, still tracked, and what `README.md` documents. |
+| `01..05`, `chaos.sh`, `recreate.sh` (root) | **Legacy Azure-only duplicates** of `scripts/` — kept, still tracked, and what `README.md` documents. |
 | `create-all.sh`, `delete-all-resources.sh`, `check-tags.sh` (root) | Thin wrappers/dispatchers into `scripts/`. **Not** duplicates. |
 
 Root-level `*.md` (11 files) are the AI-generated planning/status artefacts this `docs/` tree
@@ -324,22 +325,19 @@ replaces. See `docs/TODO.md` for the consolidation plan.
    `common/dns-$CLOUD_PROVIDER.sh`. The only remaining `az`/`gcloud` calls sit inside
    `case $CLOUD_PROVIDER` arms (step 01's `gcloud config set project`, teardown's inline Azure
    DNS delete). **Still dead code:** all three `providers/*/chaos-provider.sh` (**A6** —
-   `chaos.sh` is still Azure-only).
-6. **A few scripts remain CWD-bound.** Anchored (run from anywhere): the whole `01`–`05`
-   pipeline, `create-all.sh`, `delete-all-resources.sh`, `providers/*/get-credentials.sh`,
-   `scripts/{logs,get-logs,verify-config}.sh`. **Still CWD-bound:** `chaos.sh` (expects
-   `scripts/`), root `check-tags.sh` (expects the repo root), `flask/*.py` and
-   `redis-enterprise-testing/*` (read `../config.sh`).
+   `chaos.sh` now dispatches GCP/Azure itself).
+6. **A few scripts remain CWD-bound.** Anchored (run from anywhere): the whole `01`–`05` pipeline, `create-all.sh`, `delete-all-resources.sh`, `chaos.sh`, `providers/*/get-credentials.sh`, `scripts/{logs,get-logs,verify-config}.sh`. **Still CWD-bound:** root `check-tags.sh` (expects the repo root) and `redis-enterprise-testing/*`.
 7. **`config.sh` is committed** and holds personal values (`ThomasManson-temp-AKS`,
    `demo.paquerette.com`, `thomas_manson`). No secrets, but it should be gitignored in favour
    of `config.example.sh` — which is already **ahead** of it (`GCP_CLUSTER_RESOURCE_GROUP`,
    `NODE_COUNT`, `DNS_RESOURCE_GROUP`, `CLUSTER_RESOURCE_GROUP` are missing from `config.sh`).
    Also `DNS_RESOURCE_GROUP` is only set in the `azure` branch of the `case`.
-8. **`flask/app.py` runs `app.run(debug=True)`** — the Werkzeug debugger is remote code
-   execution if ever bound beyond localhost. Fine for a laptop demo; never expose it.
-9. **`README.md` documents the legacy root path** and references
-   `redis-enterprise-testing/cli-cluster{1,2}.sh`, which **do not exist** (the files are
-   `aadb-cli-cluster{1,2}.sh`).
+8. ~~**`flask/app.py` runs `app.run(debug=True)`**~~ ✅ **FIXED.** The console binds `127.0.0.1`,
+   `debug=False`, and accepts chaos events from localhost only. Still never expose it.
+8b. **`sed -i` and some editors drop the executable bit on this mount** (seen 2026-11-26:
+   `scripts/chaos.sh` and `tests/run.sh` became 600 → "permission denied" on the host).
+   `./tests/run.sh lint` fails if a script people run is not executable; `chmod 700` after editing.
+9. **`README.md`** is now common + per-cloud. Its AWS and Azure sections say "not verified": keep them honest until they are run.
 10. **`yaml/` is gitignored but required.** A fresh clone has no `yaml/` directory, so the
     `sed … > yaml/…` redirects fail. Step 02 also does `rm ./yaml/*.yaml`, which fails on an
     empty directory — and with `set -e` that is fatal.

@@ -2,8 +2,14 @@
 
 **Owner:** `scripts/02-setup-haproxy.sh` (legacy: root `02-setup-haproxy.sh`),
 `templates/{rec,webhook,haproxy-ingress-values}.yaml`.
-**Status:** ✅ **Rewritten 2026-09-04 — provider-agnostic and CWD-independent.** Not yet run
-against a real cloud (`../TODO.md` A10).
+**Status (2026-11-27):** ✅ runs on GCP end to end. AWS/Azure not re-run since the rewrite.
+
+## Current state (2026-11-27)
+
+- `02-setup-haproxy.sh` is now a thin driver: it starts **`02a-setup-cluster.sh` once per cluster, in parallel**, each with its own log (`debug/02a-setup-<rec>-<ts>.log`), output prefixed per cluster on the console. Chart/operator versions and `DNS_TTL` are exported to the children.
+- HAProxy ingress uses `ssl-passthrough` and routes by **SNI**: database clients must send the host name (see `active-active-database.md`).
+- `scripts/create-all.sh` waits for the `-db.` ingress host to exist (polling) instead of a fixed `sleep`.
+- Required cloud APIs are enabled by `gcp-setup.sh` (`GCP_REQUIRED_APIS`), not by the deploy.
 
 ## Purpose
 

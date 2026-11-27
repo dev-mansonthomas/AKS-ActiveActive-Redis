@@ -5,6 +5,8 @@
 - **Evidence:** 53 tracked `*.sh` files; Python used only for the Flask console and load/latency
   tooling; no Makefile, no task runner, no CI.
 
+> **Update 2026-11-27:** the "no tests" consequence below is partly resolved: see ADR 0014 (`./tests/run.sh`). Still no CI.
+
 ## Context
 
 The work is almost entirely sequencing external CLIs — `tofu`, `kubectl`, `helm`, `az`/`aws`/

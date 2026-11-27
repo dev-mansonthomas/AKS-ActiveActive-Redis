@@ -1,8 +1,12 @@
 # Spec — Flask demo console
 
 **Owner:** `flask/app.py`, `flask/k8s.py`, `flask/templates/index.html`,
-`scripts/launch-flask-console.sh` (+ its identical root duplicate).
-**Status:** works locally. Screenshot: `images/flask_app.png`.
+`chaos-webui-start.sh` / `chaos-webui-stop.sh` (root). See also `docs/specs/chaos-webui.md`, which supersedes the launcher and adds the chaos event channel.
+**Status (2026-11-27):** v2 implemented — the contract of the page, routes and chaos events is now `docs/specs/chaos-webui.md`. This file keeps the original v1 intent. Screenshot: `images/flask_app.png`.
+
+## Current state (2026-11-27)
+
+Routes (all answer within 4 s even if a region is dead): `/` page, `/redis/<region>`, `/redisha`, `/cluster/<region>` (nodes, pods, primary), `/aadb/<region>` (Active-Active database status and sync links; secret fields are never returned), `/api/chaos/event` (loopback only), `/api/chaos/state`, `/api/health`. Binds `127.0.0.1`, `debug=False`. Read-only display: no button injects chaos (`docs/adr/0012`).
 
 ## Purpose
 
@@ -31,7 +35,7 @@ Redis endpoint: `host=f"{aaDbName}-db.{region}.{dns_suffix}"`.
 
 `connect_to_redis(region)` builds the per-region FQDN and connects; `get_cluster(region)` pulls
 REC state and credentials via the `kubernetes` client and `subprocess` (`k8s.py`);
-`launch-flask-console.sh` starts the server and opens a browser.
+`chaos-webui-start.sh` starts the server quietly and opens a browser (was `launch-flask-console.sh`).
 
 ## Edge cases
 
@@ -44,7 +48,7 @@ REC state and credentials via the `kubernetes` client and `subprocess` (`k8s.py`
 
 ## Known defects
 
-- **D1 — 🔴 `app.run(debug=True)`.** The Werkzeug debugger allows arbitrary code execution on
+- **D1 — ✅ fixed (`debug=False`, localhost only).** Was `app.run(debug=True)`: The Werkzeug debugger allows arbitrary code execution on
   any request that raises. Safe only bound to localhost; **never expose this**. Should be
   `debug=os.environ.get("FLASK_DEBUG") == "1"`.
 - **D2 — `<region>` is unvalidated** and is interpolated into the Redis hostname. Restrict it to
@@ -55,7 +59,7 @@ REC state and credentials via the `kubernetes` client and `subprocess` (`k8s.py`
 - **D4 — no `flask/requirements.txt`.** Dependencies (`flask`, `redis`, `kubernetes`) are
   undeclared; only `redis-enterprise-testing/requirements.txt` exists.
 - **D5 — `subprocess` use in `k8s.py`** alongside the official client; prefer the client alone.
-- **D6 — `launch-flask-console.sh` is duplicated** verbatim at the repo root and in `scripts/`.
+- **D6 — ✅ fixed:** the launcher was duplicated at the root and in `scripts/`; now a single `chaos-webui-start.sh`.
 - **D7 — no error handling shown on the routes**; a dead region likely 500s instead of rendering
   "region down", which is exactly what the demo needs to show.
 

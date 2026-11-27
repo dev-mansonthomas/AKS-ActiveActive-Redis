@@ -2,8 +2,11 @@
 
 **Owner:** `config.sh`, `config.example.sh`, the `case $CLOUD_PROVIDER` blocks in
 `scripts/01-create-cluster.sh`, `scripts/delete-all-resources.sh`, root `check-tags.sh`.
-**Status:** partially implemented — the seam exists at step 01 only, and variable pass-through
-is incomplete.
+**Status (2026-11-27):** implemented for steps 01–05, teardown and the deploy entry points; chaos has its own per-provider functions (the `providers/*/chaos-provider.sh` files stay unused).
+
+## Current state (2026-11-27)
+
+All `providers/*/variables.tf` have no defaults and every value reaches OpenTofu as `TF_VAR_*` from `config.sh` (`scripts/verify-config.sh all`). Steps 02–05 contain no direct cloud call outside `case $CLOUD_PROVIDER` arms. GCP is exercised for real; AWS and Azure only validate.
 
 ## Purpose
 
