@@ -6,6 +6,7 @@ they need cloud credentials, which the VM deliberately does not have.
 ```bash
 ./gcp-deploy.sh   --plan-only    # preflight + tofu plan. Changes NOTHING.
 ./gcp-deploy.sh                  # build the demo   (one command up)
+./gcp-deploy.sh   --single [1|2] # ONE cluster only (default: cluster 1): REC alone, no RERC, no database. GCP only.
 ./gcp-deploy.sh   --destroy      # remove everything (one command down)
 
 ./aws-deploy.sh   [--plan-only|--destroy]
@@ -15,6 +16,7 @@ they need cloud credentials, which the VM deliberately does not have.
 | Option | Effect |
 |---|---|
 | `--plan-only` | Preflight + `tofu plan`, then stop. Nothing is created. **Use this first.** |
+| `--single [1\|2]` | Deploy only cluster 1 (or 2): one REC, steps 03 (RERC) and 04 (database) skipped, preflight limited to that region. **Refused** when it would delete a deployed cluster; `--destroy` needs no flag (it follows the Terraform state). GCP only: the other clouds exit 2. See ADR 0015. |
 | `--destroy` | Tear down: K8s namespaces, Helm releases, DNS records, then `tofu destroy`. |
 | `--skip-preflight` | Bypass the checks. Not recommended. |
 | `-h` / `--help` | Usage. |

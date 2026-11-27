@@ -7,6 +7,7 @@
 ## Current state (2026-11-27)
 
 - Order matters: on **both** clusters the custom resources go first (`re_k8s_teardown <ctx> crs`: REAADB, then RERC, then REC), and only then the infrastructure (`infra`: namespaces, Helm release) and `tofu destroy`. Deleting the RERC of one cluster while the other still referenced it left objects stuck.
+- Which clusters? The ones the OpenTofu **state** holds (`re_clusters_in_state`; unreadable state = both). A single-cluster deployment (`gcp-deploy.sh --single`, ADR 0015) is therefore torn down with the same command, and the cluster that never existed no longer counts as "still in state but unreachable" (`re_cluster_in_state <index>`). Test: `tests/shell/test_teardown.sh`.
 - Kubernetes teardown is sequential; parallelising it is `TODO.md` N6.
 - GKE node pools can take up to an hour to delete on GCP's side (`GCP_CLUSTER_TIMEOUT`).
 - Verify afterwards with `./check-tags.sh` (also sweeps by name through Cloud Asset on GCP).

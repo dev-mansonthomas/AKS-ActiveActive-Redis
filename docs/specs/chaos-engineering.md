@@ -11,6 +11,8 @@ Prove the customer-facing claim: with Active-Active, losing a pod, a VM or a who
 interrupt service from the other region and the operator repairs the affected one without human action
 on the Redis side.
 
+**Precondition:** both clusters must exist. `chaos.sh` exits 2 when the peer cluster has no kubeconfig context (a single-cluster deployment, `gcp-deploy.sh --single`, cannot run chaos: every scenario needs the witness).
+
 ## Inputs
 
 `config.sh` (via `common/lib.sh`), a deployed pair of clusters, cloud CLI logged in on the host.

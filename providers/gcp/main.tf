@@ -35,6 +35,38 @@ provider "google" {
 }
 
 # ============================================================================
+# Which clusters to create (config: RE_CLUSTERS, set by `gcp-deploy.sh --single`)
+# ============================================================================
+# The VPC and the firewalls are shared; each cluster has its own subnet. A cluster that is
+# not selected is simply not created. Resources keep their names: the `moved` blocks map
+# the addresses of a state written before `count` existed (no-op plan).
+
+locals {
+  enable1 = contains(var.clusters, "1")
+  enable2 = contains(var.clusters, "2")
+}
+
+moved {
+  from = google_compute_subnetwork.region1
+  to   = google_compute_subnetwork.region1[0]
+}
+
+moved {
+  from = google_compute_subnetwork.region2
+  to   = google_compute_subnetwork.region2[0]
+}
+
+moved {
+  from = google_container_cluster.region1
+  to   = google_container_cluster.region1[0]
+}
+
+moved {
+  from = google_container_cluster.region2
+  to   = google_container_cluster.region2[0]
+}
+
+# ============================================================================
 # VPC Network (Global in GCP)
 # ============================================================================
 
@@ -51,6 +83,8 @@ resource "google_compute_network" "vpc" {
 # ============================================================================
 
 resource "google_compute_subnetwork" "region1" {
+  count = local.enable1 ? 1 : 0
+
   name          = "${var.cluster_prefix}-subnet-${var.region1}"
   ip_cidr_range = var.subnet_cidr1
   region        = var.region1
@@ -75,6 +109,8 @@ resource "google_compute_subnetwork" "region1" {
 # ============================================================================
 
 resource "google_compute_subnetwork" "region2" {
+  count = local.enable2 ? 1 : 0
+
   name          = "${var.cluster_prefix}-subnet-${var.region2}"
   ip_cidr_range = var.subnet_cidr2
   region        = var.region2
@@ -138,6 +174,8 @@ resource "google_compute_firewall" "allow_redis" {
 # ============================================================================
 
 resource "google_container_cluster" "region1" {
+  count = local.enable1 ? 1 : 0
+
   name     = "${var.cluster_prefix}-${var.region1}"
   location = var.region1
 
@@ -146,7 +184,7 @@ resource "google_container_cluster" "region1" {
   node_locations = var.zones1
 
   network    = google_compute_network.vpc.name
-  subnetwork = google_compute_subnetwork.region1.name
+  subnetwork = google_compute_subnetwork.region1[0].name
 
   # Deliberately NOT configurable. The google provider defaults this to true
   # since v6.0, which makes `tofu destroy` fail with:
@@ -255,6 +293,8 @@ resource "google_container_cluster" "region1" {
 # ============================================================================
 
 resource "google_container_cluster" "region2" {
+  count = local.enable2 ? 1 : 0
+
   name     = "${var.cluster_prefix}-${var.region2}"
   location = var.region2
 
@@ -262,7 +302,7 @@ resource "google_container_cluster" "region2" {
   node_locations = var.zones2
 
   network    = google_compute_network.vpc.name
-  subnetwork = google_compute_subnetwork.region2.name
+  subnetwork = google_compute_subnetwork.region2[0].name
 
   # Start with minimal node pool (will be replaced by managed node pool)
   # Deliberately NOT configurable. The google provider defaults this to true

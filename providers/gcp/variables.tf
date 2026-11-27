@@ -146,3 +146,17 @@ variable "node_service_account" {
   EOT
   type        = string
 }
+
+variable "clusters" {
+  description = <<-EOT
+    Which clusters to create: ["1","2"] for both (Active-Active), or one of them for a
+    single-cluster deployment (exported from RE_CLUSTERS, set by `gcp-deploy.sh --single`).
+    The shared VPC and firewalls are always created.
+  EOT
+  type        = set(string)
+
+  validation {
+    condition     = length(var.clusters) > 0 && alltrue([for c in var.clusters : contains(["1", "2"], c)])
+    error_message = "clusters must be non-empty and contain only \"1\" and/or \"2\"."
+  }
+}

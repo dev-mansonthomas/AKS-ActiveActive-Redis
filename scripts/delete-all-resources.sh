@@ -31,6 +31,16 @@ FAILED=0
 
 re_log "🗑️  Deleting all resources on $CLOUD_PROVIDER"
 
+# Which clusters exist? The Terraform state is the truth: a single-cluster deployment
+# (gcp-deploy.sh --single) needs no flag to be torn down. State unreadable or empty: both.
+if _in_state=$(re_clusters_in_state) && [ -n "$_in_state" ]; then
+  export RE_CLUSTERS="$_in_state"
+else
+  export RE_CLUSTERS="1 2"
+fi
+SELECTED=$(re_selected_indexes) || exit 2
+re_log "   clusters to remove: $(for _i in $SELECTED; do printf '%s ' "$(re_cluster_name "$_i")"; done)"
+
 # Pin the cloud identity and (re)load kubeconfig BEFORE touching Kubernetes.
 # Otherwise kubectl/gcloud use whatever account is globally active, cannot
 # reach the cluster, and the PVCs / LoadBalancer are silently never deleted.
@@ -42,15 +52,16 @@ re_log "🧹 Cleaning up Kubernetes resources (ordered, bounded — see re_k8s_t
 # Phase 1 on BOTH clusters first: an RERC can only be finalised while the REC
 # it points at still exists, so no cluster may lose its REC before every RERC
 # is gone.
-for CLUSTER in "$CLUSTER1" "$CLUSTER2"; do
-  re_k8s_teardown "$CLUSTER" crs || true
+for IDX in $SELECTED; do
+  re_k8s_teardown "$(re_cluster_name "$IDX")" crs || true
 done
-for CLUSTER in "$CLUSTER1" "$CLUSTER2"; do
+for IDX in $SELECTED; do
+  CLUSTER="$(re_cluster_name "$IDX")"
   re_k8s_teardown "$CLUSTER" infra
   rc=$?
   if [ "$rc" -eq 3 ]; then
     # Unreachable is fine ONLY if the cluster no longer exists.
-    re_cluster_in_state; st=$?
+    re_cluster_in_state "$IDX"; st=$?
     if [ "$st" -eq 2 ]; then
       re_warn "$CLUSTER: unreachable and the Terraform state cannot be read — cannot tell whether the"
       re_warn "   cluster still exists: PVC disks and the ingress LoadBalancer may be orphaned"

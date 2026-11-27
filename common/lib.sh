@@ -525,6 +525,9 @@ re_export_tf_vars() {
       export TF_VAR_services_cidr2="$GCP_SERVICES_CIDR2"
       export TF_VAR_redis_ports="$GCP_REDIS_PORTS"
       export TF_VAR_node_service_account="$GCP_NODE_SERVICE_ACCOUNT"
+      # which clusters to create: ["1","2"] or a single one (gcp-deploy.sh --single)
+      TF_VAR_clusters="$(re_to_tf_list "$(re_selected_indexes | tr ' ' ',')")" || re_die "invalid RE_CLUSTERS"
+      export TF_VAR_clusters
       ;;
     *)
       re_die "invalid CLOUD_PROVIDER '$CLOUD_PROVIDER' (expected azure, aws or gcp)"
@@ -823,16 +826,98 @@ re_aa_db_password() {
     -o jsonpath='{.data.password}' 2>/dev/null | re_b64_decode 2>/dev/null || true
 }
 
-# re_cluster_in_state — does the OpenTofu state still hold a managed K8s cluster?
-# Used by teardown to tell "cluster already gone" (fine) from "cluster exists
-# but kubectl cannot reach it" (PVCs / LoadBalancer would leak).
-# Returns 0 = yes, 1 = no, 2 = cannot tell (state locked / not initialised / tofu missing):
-# the caller must NOT read 2 as "gone".
+# ---- which clusters does this run work on? ------------------------------------------------------
+# RE_CLUSTERS selects them: "1 2" (default, Active-Active), "1" or "2" (single-cluster deployment,
+# set by `gcp-deploy.sh --single [1|2]`). It is exported to every step. It is NOT stored in config.sh:
+# the OpenTofu state is the truth for what exists (re_clusters_in_state), so `--destroy` needs no flag.
+
+# re_selected_indexes — prints the selected cluster indexes in canonical order ("1 2", "1" or "2").
+# Exit 2 on an invalid selection (nothing printed on stdout).
+re_selected_indexes() {
+  local i has1="" has2=""
+  for i in ${RE_CLUSTERS:-1 2}; do
+    case "$i" in
+      1) has1=1 ;;
+      2) has2=1 ;;
+      *) echo "RE_CLUSTERS: invalid entry '$i' (use 1, 2 or '1 2')" >&2; return 2 ;;
+    esac
+  done
+  [ -n "$has1$has2" ] || { echo "RE_CLUSTERS is empty (use 1, 2 or '1 2')" >&2; return 2; }
+  printf '%s\n' "${has1:+1}${has1:+${has2:+ }}${has2:+2}"
+}
+
+re_cluster_name() { case "$1" in 1) printf '%s' "${CLUSTER1:-}" ;; 2) printf '%s' "${CLUSTER2:-}" ;; *) return 2 ;; esac; }
+re_rec_name()     { case "$1" in 1) printf '%s' "${REC_NAME1:-}" ;; 2) printf '%s' "${REC_NAME2:-}" ;; *) return 2 ;; esac; }
+re_region_of()    { case "$1" in 1) printf '%s' "${REGION1:-}" ;; 2) printf '%s' "${REGION2:-}" ;; *) return 2 ;; esac; }
+
+# re_is_single — true when exactly one cluster is selected.
+re_is_single() { local s; s=$(re_selected_indexes) || return 2; [ "$s" != "1 2" ]; }
+
+# re_cluster_state_pattern [index] — grep -E pattern of the managed-cluster resource in the OpenTofu
+# state (with or without a count index). No index = any cluster.
+re_cluster_state_pattern() {
+  local i="${1:-}" base
+  case "$CLOUD_PROVIDER" in
+    gcp)   base='google_container_cluster\.region' ;;
+    aws)   base='aws_eks_cluster\.region' ;;
+    azure) base='azurerm_kubernetes_cluster\.k8s' ;;
+    *)     return 2 ;;
+  esac
+  if [ -n "$i" ]; then printf '%s%s($|\[)' "$base" "$i"; else printf 'container_cluster|eks_cluster|kubernetes_cluster'; fi
+}
+
+# _re_state_list — `tofu state list` of the current provider; 2 = cannot tell (locked, not initialised,
+# tofu missing): callers must NOT read it as "nothing deployed".
+_re_state_list() {
+  [ -d "$REPO_ROOT/providers/$CLOUD_PROVIDER" ] || return 2
+  ( cd "$REPO_ROOT/providers/$CLOUD_PROVIDER" && tofu state list 2>/dev/null ) || return 2
+}
+
+# re_clusters_in_state — prints the indexes ("1 2", "1", "2", or nothing) of the clusters the OpenTofu
+# state holds. Exit 2 when the state cannot be read.
+re_clusters_in_state() {
+  local out i found=""
+  out=$(_re_state_list) || return 2
+  for i in 1 2; do
+    if printf '%s\n' "$out" | grep -qE "$(re_cluster_state_pattern "$i")"; then found="$found $i"; fi
+  done
+  printf '%s\n' "${found# }"
+}
+
+# re_cluster_in_state [index] — is that cluster (or, without an argument, any cluster) in the state?
+# Teardown uses it to tell "cluster already gone" (fine) from "exists but kubectl cannot reach it"
+# (PVCs / LoadBalancer would leak). 0 = yes, 1 = no, 2 = cannot tell: never read 2 as "gone".
 re_cluster_in_state() {
   local out
-  [ -d "$REPO_ROOT/providers/$CLOUD_PROVIDER" ] || return 2
-  out=$( cd "$REPO_ROOT/providers/$CLOUD_PROVIDER" && tofu state list 2>/dev/null ) || return 2
-  printf '%s\n' "$out" | grep -qE 'container_cluster|eks_cluster|kubernetes_cluster'
+  out=$(_re_state_list) || return 2
+  printf '%s\n' "$out" | grep -qE "$(re_cluster_state_pattern "${1:-}")"
+}
+
+# re_resolve_clusters — for scripts that can be run on their own (05, get-credentials, get-logs…): when no
+# deploy flag set RE_CLUSTERS, use the clusters the OpenTofu state holds (both when it is empty or unreadable)
+# and export it. Never overrides an explicit RE_CLUSTERS. Without this, a script would query the cluster of a
+# single-cluster deployment that does not exist, and wait for kubectl to time out on a stale kubeconfig context.
+re_resolve_clusters() {
+  if [ -z "${RE_CLUSTERS:-}" ]; then
+    local d; d=$(re_clusters_in_state 2>/dev/null) || d=""
+    export RE_CLUSTERS="${d:-1 2}"
+  fi
+}
+
+# re_selection_guard — refuse a selection that would DELETE a deployed cluster (count = 0 destroys it).
+# Widening (state has 1, selection 1 2) is fine. An unreadable state (fresh checkout) does not block.
+re_selection_guard() {
+  local sel in_state i
+  sel=$(re_selected_indexes) || return 2
+  in_state=$(re_clusters_in_state) || return 0
+  for i in $in_state; do
+    case " $sel " in
+      *" $i "*) ;;
+      *) echo "Cluster $i ($(re_cluster_name "$i")) is already deployed and is not in this selection (RE_CLUSTERS='$sel'):" >&2
+         echo "applying it would DELETE that cluster. Deploy both (no --single), or run --destroy first." >&2
+         return 1 ;;
+    esac
+  done
 }
 
 # re_disable_client_auth <context> <rec> — switch client-certificate enforcement off on the AA database

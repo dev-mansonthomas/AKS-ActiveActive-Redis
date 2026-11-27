@@ -209,9 +209,23 @@ one VPC, Cloud DNS records, node pools created inline with the cluster.
 ./gcp-deploy.sh --plan-only      # review
 ./gcp-deploy.sh                  # ≈ 13 min; ends with the connection details (step 05)
 ./scripts/chaos.sh --check-only  # everything green? then the demo is ready
-./gcp-deploy.sh --destroy        # ≈ 15 min
+./gcp-deploy.sh --destroy        # ≈ 15 min (removes whatever is deployed: no flag needed)
 ./check-tags.sh                  # GCP cannot label networks/firewalls: the audit also sweeps by name via Cloud Asset
 ```
+
+**Only one cluster** (a plain Redis Enterprise cluster, e.g. for an RDI or SQL demo): add `--single`.
+
+```bash
+./gcp-deploy.sh --single --plan-only   # cluster 1 only (the default); --single 2 for cluster 2
+./gcp-deploy.sh --single               # one GKE cluster + ingress + operator + REC; no RERC, no database
+./scripts/05-get-cluster-info.sh       # REC login and UI hint (there is no database to connect to)
+./gcp-deploy.sh --destroy              # same command as for two clusters
+```
+
+It builds half of the infrastructure (one subnet, one cluster; the VPC and firewalls are shared) and skips steps 03 and 04.
+The selection is refused if it would delete a cluster that is already deployed (for example `--single` while cluster 2 exists):
+run `--destroy` first. `chaos.sh` needs both clusters and exits with an explanation on a single-cluster deployment; the chaos
+console only shows the missing cluster as unreachable. GCP only for now: `aws-deploy.sh` and `azure-deploy.sh` reject `--single`.
 
 Notes: GKE node-pool operations can be slow (up to an hour on GCP's side), hence `GCP_CLUSTER_TIMEOUT=90m`.
 `./scripts/diagnose-gcp.sh` prints the raw errors the preflight condenses and ends with a real `tofu plan`.

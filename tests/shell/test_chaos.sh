@@ -182,6 +182,12 @@ STUB_POOL_STUCK=1 CHAOS_NODES_TIMEOUT=3 run_chaos stuck --no-prompt --scenario r
 assert_rc $RC 1 "pool that never returns Ready nodes: the run FAILS instead of hanging"
 has_event '{"type":"step","name":"region-restore","status":"FAIL"}' && ok "region-restore FAIL reported" || bad "no region-restore FAIL"
 
+# ------------------------------------------------------ chaos needs BOTH clusters (not a single-cluster deployment)
+STUB_ONLY_CONTEXT=cl-a run_chaos single --no-prompt --check-only
+assert_rc $RC 2 "the peer cluster has no kubeconfig context: refused (2)"
+assert_contains "$OUT" "single-cluster" "...explaining that chaos needs the Active-Active pair"
+[ -e "$STUB_DIR/events.log" ] && bad "events sent although nothing can run" || ok "nothing announced to the console"
+
 # ------------------------------------------------------ --check-only ignores --scenario
 run_chaos co --no-prompt --check-only --scenario node
 assert_rc $RC 0 "--check-only exits 0"

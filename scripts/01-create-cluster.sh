@@ -39,7 +39,7 @@ case "$CLOUD_PROVIDER" in
   azure) re_log "📍 Azure AKS in $AZURE_REGION1 / $AZURE_REGION2" ;;
   aws)   re_log "📍 AWS EKS $AWS_EKS_VERSION in $AWS_REGION1 / $AWS_REGION2" ;;
   gcp)
-    re_log "📍 GCP GKE in $GCP_REGION1 / $GCP_REGION2 (project $GCP_PROJECT_ID)"
+    re_log "📍 GCP GKE, cluster(s) $(re_selected_indexes) in $(for i in $(re_selected_indexes); do printf '%s ' "$(re_region_of "$i")"; done)(project $GCP_PROJECT_ID)"
     re_run gcloud config set project "$GCP_PROJECT_ID"
     ;;
 esac
@@ -54,4 +54,4 @@ re_run ./get-credentials.sh || re_die "get-credentials.sh failed"
 re_log "Contexts now available:"
 kubectl config get-contexts -o name 2>/dev/null | sed 's/^/    /' || true
 
-re_log "✅ Clusters created: $CLUSTER1, $CLUSTER2"
+re_log "✅ Clusters created: $(for i in $(re_selected_indexes); do printf '%s ' "$(re_cluster_name "$i")"; done)"

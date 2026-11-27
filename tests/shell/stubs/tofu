@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # tofu stub: `state list` prints $STUB_TOFU_STATE (default: one GKE cluster), or fails with STUB_TOFU_FAIL=1.
-[ -z "${STUB_TOFU_FAIL:-}" ] || { echo "Error: state is locked" >&2; exit 1; }
+# Every call is logged (with the cluster selection Terraform would receive) when STUB_DIR is set.
+[ -z "${STUB_DIR:-}" ] || echo "tofu $* [TF_VAR_clusters=${TF_VAR_clusters:-}]" >> "$STUB_DIR/calls.log"
 case "$*" in
-  "state list") printf '%s\n' "${STUB_TOFU_STATE-google_container_cluster.region1}" ;;
+  "state list")
+    [ -z "${STUB_TOFU_FAIL:-}" ] || { echo "Error: state is locked" >&2; exit 1; }
+    printf '%s\n' "${STUB_TOFU_STATE-google_container_cluster.region1}" ;;
 esac
 exit 0

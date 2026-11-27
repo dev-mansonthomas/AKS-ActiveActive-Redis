@@ -185,6 +185,14 @@ if [ -n "$POD_ARG" ]; then
   fi
 fi
 
+# Chaos plays one cluster against the other (witness): it cannot run on a single-cluster deployment.
+if ! kubectl config get-contexts -o name 2>/dev/null | grep -qx -- "$OTHER"; then
+  echo "❌ no kubeconfig context '$OTHER': chaos needs BOTH clusters (Active-Active)." >&2
+  echo "   A single-cluster deployment (gcp-deploy.sh --single) cannot run it." >&2
+  echo "   If both are deployed, load the contexts:  providers/$CLOUD_PROVIDER/get-credentials.sh" >&2
+  exit 2
+fi
+
 CHAOS_TIMEOUT="${CHAOS_TIMEOUT:-900}"
 RUN_ID="$(date +%Y%m%d-%H%M%S)"
 export CHAOS_RUN_ID="$RUN_ID"   # read by chaos_notify

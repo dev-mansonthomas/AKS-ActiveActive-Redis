@@ -2,8 +2,9 @@
 # ============================================================================
 # GCP GKE — load kubeconfig contexts
 # ============================================================================
-# Contract: on exit, kubectl has contexts named exactly $CLUSTER1 and $CLUSTER2
-# (as derived in config.sh). Steps 02-05 rely on those names.
+# Contract: on exit, kubectl has contexts named exactly after the selected clusters
+# ($CLUSTER1 and/or $CLUSTER2 as derived in config.sh; RE_CLUSTERS, see re_selected_indexes).
+# Steps 02-05 rely on those names.
 # Run from anywhere. HOST ONLY — needs gcloud auth.
 # ============================================================================
 
@@ -12,12 +13,14 @@ set -uo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/common/lib.sh"
 
 re_load_config
+re_resolve_clusters   # standalone: only the clusters that exist (RE_CLUSTERS set by a deploy wins)
 
 re_log "🔑 Configuring kubectl for GKE (project $GCP_PROJECT_ID)"
 
-for pair in "$CLUSTER1:$GCP_REGION1" "$CLUSTER2:$GCP_REGION2"; do
-  cluster="${pair%%:*}"
-  region="${pair##*:}"
+selected=$(re_selected_indexes) || exit 2
+for idx in $selected; do
+  cluster="$(re_cluster_name "$idx")"
+  region="$(re_region_of "$idx")"
 
   re_log "📍 $cluster ($region)"
   re_run gcloud container clusters get-credentials "$cluster" \
@@ -35,4 +38,4 @@ for pair in "$CLUSTER1:$GCP_REGION1" "$CLUSTER2:$GCP_REGION2"; do
   re_log "✅ context $cluster ready"
 done
 
-re_log "✅ kubectl configured for $CLUSTER1 and $CLUSTER2"
+re_log "✅ kubectl configured for: $(for i in $selected; do printf '%s ' "$(re_cluster_name "$i")"; done)"

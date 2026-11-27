@@ -22,6 +22,7 @@ REPO_ROOT_GUESS="$(cd "$(dirname "$_DEPLOY_SELF")/.." && pwd)"
 DESTROY=0
 SKIP_PREFLIGHT=0
 PLAN_ONLY=0
+SINGLE=""   # "" = both clusters; 1 or 2 = single-cluster deployment (gcp only)
 
 deploy_usage() {
   cat <<USAGE
@@ -33,12 +34,17 @@ Reads ALL configuration from config.sh. Logs to debug/.
 Options:
   --destroy          Tear everything down instead of deploying.
   --plan-only        Run preflight + 'tofu plan' and stop. Changes nothing.
+  --single [1|2]     Deploy ONE cluster only (default: cluster 1): one REC, no RERC,
+                     no Active-Active database. GCP only. --destroy needs no flag
+                     (it removes what the Terraform state holds).
   --skip-preflight   Skip the prerequisite checks (not recommended).
   -h, --help         This message.
 
 Examples:
   ./${DEPLOY_CLOUD}-deploy.sh --plan-only    # safe first run
   ./${DEPLOY_CLOUD}-deploy.sh                # build the demo
+  ./${DEPLOY_CLOUD}-deploy.sh --single       # only cluster 1 (REC alone)
+  ./${DEPLOY_CLOUD}-deploy.sh --single 2     # only cluster 2
   ./${DEPLOY_CLOUD}-deploy.sh --destroy      # remove everything
 USAGE
 }
@@ -48,6 +54,11 @@ deploy_parse_args() {
     case "$1" in
       --destroy)        DESTROY=1 ;;
       --plan-only)      PLAN_ONLY=1 ;;
+      --single)         if [ "$DEPLOY_CLOUD" != "gcp" ]; then
+                          echo "--single is only supported on gcp for now (providers/$DEPLOY_CLOUD/main.tf always creates two clusters)" >&2
+                          exit 2
+                        fi
+                        case "${2:-}" in 1|2) SINGLE="$2"; shift ;; *) SINGLE=1 ;; esac ;;
       --yes|-y)         ;;  # accepted for compatibility; runs are always unattended
       --skip-preflight) SKIP_PREFLIGHT=1 ;;
       -h|--help)        deploy_usage; exit 0 ;;
@@ -238,8 +249,12 @@ deploy_banner() {
   printf '  │  %-60s│\n' "$action"
   echo "  ├──────────────────────────────────────────────────────────────┤"
   printf '  │  cloud    : %-49s│\n' "$DEPLOY_CLOUD"
-  printf '  │  clusters : %-49s│\n' "$CLUSTER1, $CLUSTER2"
-  printf '  │  regions  : %-49s│\n' "$REGION1, $REGION2"
+  local i names="" regions=""
+  for i in $(re_selected_indexes); do
+    names="${names:+$names, }$(re_cluster_name "$i")"; regions="${regions:+$regions, }$(re_region_of "$i")"
+  done
+  printf '  │  clusters : %-49s│\n' "$names"
+  printf '  │  regions  : %-49s│\n' "$regions"
   printf '  │  machine  : %-49s│\n' "$INSTANCE_TYPE"
   printf '  │  DNS zone : %-49s│\n' "$DNS_ZONE"
   printf '  │  owner    : %-49s│\n' "$owner"
@@ -262,6 +277,17 @@ deploy_main() {
   re_log "═══════════════════════════════════════════════════════════"
   re_log " Redis Enterprise Active/Active — $(re_upper "$DEPLOY_CLOUD")"
   re_log "═══════════════════════════════════════════════════════════"
+
+  # Which clusters this run works on. Exported: every step inherits it. Not stored in config.sh:
+  # the Terraform state says what exists, so --destroy needs no flag.
+  if [ "$DESTROY" -eq 1 ]; then
+    [ -z "$SINGLE" ] || re_warn "--single is ignored with --destroy: the clusters in the Terraform state are removed"
+  else
+    export RE_CLUSTERS="${SINGLE:-1 2}"
+    re_selected_indexes >/dev/null || exit 2
+    # a selection that leaves out a deployed cluster would DELETE it (count = 0): refuse
+    re_selection_guard || exit 2
+  fi
 
   # ALWAYS enforced, even with --skip-preflight: running the wrong cloud's script
   # against a config.sh for another cloud would act on the wrong cloud's resources.
@@ -305,7 +331,11 @@ deploy_main() {
   fi
 
   # ------------------------------------------------------------------ deploy
-  deploy_banner "DEPLOYING the $(re_upper "$DEPLOY_CLOUD") demo (2 clusters, billable)"
+  if re_is_single; then
+    deploy_banner "DEPLOYING the $(re_upper "$DEPLOY_CLOUD") demo (SINGLE cluster $(re_selected_indexes), REC only, billable)"
+  else
+    deploy_banner "DEPLOYING the $(re_upper "$DEPLOY_CLOUD") demo (2 clusters, billable)"
+  fi
   local start=$SECONDS
   if bash "$REPO_ROOT/scripts/create-all.sh"; then
     re_log ""
