@@ -1,0 +1,2 @@
+# Test-only dependencies (flask/tests). Runtime deps are in requirements.txt.
+pytest==9.2.0

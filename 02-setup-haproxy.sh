@@ -61,11 +61,11 @@ do
   # install ingress controller
   helm install haproxy-ingress haproxy-ingress/haproxy-ingress\
     --create-namespace --namespace ingress-controller\
-    --version 0.14.4\
+    --version 0.16.1\
     -f templates/haproxy-ingress-values.yaml
 
   # Install Redis operator
-  kubectl apply -n $NS -f https://raw.githubusercontent.com/RedisLabs/redis-enterprise-k8s-docs/master/bundle.yaml
+  kubectl apply -n $NS -f https://raw.githubusercontent.com/RedisLabs/redis-enterprise-k8s-docs/v8.2.0-13/bundle.yaml
 
   wait_until "kubectl -n \$NS get secret admission-tls >/dev/null 2>&1" 12 5 "Waiting for admission-tls secret in \$CLUSTER"
 

@@ -1,29 +1,19 @@
 import redis
 import datetime
 import logging
-import subprocess
+import sys
+from pathlib import Path
 import random
 import string
 
-def get_config_var(name):
-    try:
-        value = subprocess.check_output(
-            f"source ./config.sh >/dev/null 2>&1 && echo -n ${name}",
-            shell=True,
-            executable="/bin/bash"
-        )
-        return value.decode("utf-8").strip() or None
-    except subprocess.CalledProcessError:
-        return None
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "common"))
+from appconfig import Config  # noqa: E402
 
-# Load configuration from config.sh
-aaDbName = get_config_var("AA_DB_NAME")
-cluster1 = get_config_var("CLUSTER1")
-cluster2 = get_config_var("CLUSTER2")
-cluster3 = get_config_var("CLUSTER3")
-dns_suffix = get_config_var("DNS_ZONE")
-
-regions = [c for c in [cluster1, cluster2, cluster3] if c]
+cfg = Config()
+aaDbName = cfg.aa_db
+dns_suffix = cfg.dns_zone
+# regions = cloud cluster names (kube contexts); hosts use the REC name (rec-a).
+regions = cfg.clusters
 
 
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
@@ -37,10 +27,11 @@ def randStr(chars=string.ascii_uppercase + string.digits, N=10):
 
 redis_clients = {}
 for region in regions:
-    log.info(f"🔌 Connecting to Redis cluster in region: {region} (host: {aaDbName}-db.redis-{region}.{dns_suffix})")
+    log.info(f"🔌 Connecting to Redis cluster in region: {region} (host: {cfg.db_host(region)})")
     redis_clients[region] = redis.StrictRedis(
-        host=f"{aaDbName}-db.{region}.{dns_suffix}",
+        host=cfg.db_host(region),
         port=443, db=0,
+        password=cfg.db_password(regions[0]),
         ssl=True,
         ssl_cert_reqs=None,
     )

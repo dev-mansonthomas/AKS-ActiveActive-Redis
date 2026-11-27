@@ -1,594 +1,275 @@
-# Deploying Redis Enterprise Active/Active on AKS & Demo
+# Redis Enterprise Active-Active on managed Kubernetes — multi-cloud demo rig
 
-This repo contains deployment scripts and web monitoring dashboard for Active/Active Redis Enterprise deployment in two Azure Regions.
-This repo will allow you to showcase the 99.999% HA capabilities of RedisEnterprise
+One command builds **two Kubernetes clusters in two regions**, installs Redis Enterprise in each,
+links them and creates one **Active-Active (CRDB) database** across both. One command removes
+everything. A chaos harness and a web console then show the database surviving the loss of a pod,
+a VM, or a whole region — with no human action on the Redis side.
 
-![alt text](images/flask_app.png)
+![The chaos console](images/flask_app.png)
 
-# Prerequisites and Configuration
+It is a **disposable demo for Solution Architects**, not production infrastructure. It is meant to
+live a few hours, be reachable from anywhere, and be destroyed afterwards.
 
-## Prerequisites
+| Cloud | State (2026-11-27) |
+|---|---|
+| **GCP / GKE** | ✅ Validated end to end: deploy ≈ 13 min, destroy ≈ 15 min, chaos scenarios `pod`, `node`, `region`, `region-recover`. [Go to the GCP section](#gcp-gke). |
+| **AWS / EKS** | ⚠️ Terraform validates; **never applied**. DNS (CNAME for ELB hostnames) and EBS CSI are not done. [AWS section](#aws-eks). |
+| **Azure / AKS** | ⚠️ Worked before the multi-cloud rework; **not re-verified since** (no Azure access). [Azure section](#azure-aks). |
 
-You'll need : 
-* A temporary license for Redis Enterprise if you want to create more than 4 shards
-* A domain name (if you don't have it, try Gandi.net)
-* Azure account
-* 2 regions, with each 24 vCPU, supporting AKZ & Azure Identity Management
-  * this can be lowered to 2 vCPU per node, so 6 per region, total of 12 for the active/active setup
+Where to read more: this file is for **humans** (copy-paste, no prior knowledge assumed).
+Agents and maintainers: [`CLAUDE.md`](CLAUDE.md) and [`docs/`](docs/) (PRD, specs, architecture, ADRs, TODO).
 
-_Software on your machine_
+---
 
-- bash 5 
-  - `brew install bash` 
-  - add `/opt/homebrew/opt/bash` to `/etc/shells`
-  - `sudo chsh -s "$(brew --prefix)/bin/bash" $USER`
-- az CLI
-- OpenTofu
-- kubectl
-- helm
-- jq
-- python3
+# Part 1 — Common to every cloud
 
-## Summary
+## 1.1 What you need
 
-This section will walk through Azure configuration and the config.sh configuration
+* A **domain name** you can delegate a sub-domain of (Redis Active-Active needs resolvable FQDNs, not IPs).
+* An account on the cloud you choose, with enough quota for **2 × 3 nodes of 8 vCPU / 30 GB** (48 vCPU in total).
+* A Redis Enterprise license **only** if you want more than 4 shards per cluster (a 30-day trial runs without one).
 
-* Login in Azure
-* Check that you can get your subscription ID
-* Configure Azure to manage a subdomain of your DNS domain
-* Configure your domain name to delegate that subdomain to Azure
-* Find a region with sufficient quota for the two K8S cluster for Redis Enterprise
-* 
+Tools on your machine (the **host**, not a VM — they need your cloud credentials):
 
-## Azure subscription and CLI
+| Tool | Notes |
+|---|---|
+| `bash` 5 | macOS ships bash 3.2. `brew install bash`, then put Homebrew's `bin` first in your `PATH` (`/opt/homebrew/bin` on Apple silicon): every script starts with `#!/usr/bin/env bash`, so it picks up that bash, and refuses to run with an older one (message tells you what to do). Check: `bash --version` |
+| `tofu` (OpenTofu ≥ 1.6) | **not** `terraform` |
+| `kubectl`, `helm`, `jq`, `curl`, `python3` | |
+| your cloud CLI | `gcloud` (+ `gke-gcloud-auth-plugin`), `aws` or `az` |
+| `redis-cli` ≥ 8 | optional, to talk to the database |
+| `k9s` | optional |
 
-You need t be able to successfully authenticate your azure cli to the Azure Subscription:
-```shell
-az login
-```
-
-## Fetch Azure subscription ID
-```shell
-az account show --query id -o tsv
-```
-
-ex: e48e7b4e-f9d8-4d23-81ac-d204f77b00ac (UUID v4 format)
-
-## Azure DNS Zone
-
-Redis Enterprise ActiveActive requires FQDN (NOT the public IP) of the ingress services for both participating clusters. 
-In your Azure Subscription create DNS Zone and make sure it resolvable by the public DNS. 
-You can use a subdomain of the existing domain hosted elsewhere.
-
-### Azure DNS Zone creation
-
-Let's take the Top Level Domain like **paquerette.com**.
-
-We'll delegate a subdomain of this domain to Azure Name Servers to give FQDN to our clusters. For exemple : **demo.paquerette.com**.
-
-Update the config.sh with domain.
-
-```shell
-DNS_ZONE=demo.paquerette.com
-```
-
-Create the dns zone in Azure which will provide the Name Servers that will manage this subdomain.
-
-Choose a ResourceGroup, exemple "ThomasManson" and set it to config.sh
-
-```shell
-# Resource Group zone where DNS is defined
-DNS_RESOURCE_GROUP=ThomasManson
-```
-And then run this command, replacing **_DNS_RESOURCE_GROUP_** with your DNS resource group (e.g., ThomasManson).
-
-```shell
-az network dns zone create \
-  --resource-group DNS_RESOURCE_GROUP \
-  --name demo.paquerette.com
-
-{
-  "etag": "c....0",
-  "id": "/subscriptions/e....7/resourceGroups/thomasmanson/providers/Microsoft.Network/dnszones/demo.paquerette.com",
-  "location": "global",
-  "maxNumberOfRecordSets": 10000,
-  "name": "demo.paquerette.com",
-  "nameServers": [
-    "ns1-04.azure-dns.com.",
-    "ns2-04.azure-dns.net.",
-    "ns3-04.azure-dns.org.",
-    "ns4-04.azure-dns.info."
-  ],
-  "numberOfRecordSets": 2,
-  "resourceGroup": "thomasmanson",
-  "tags": {},
-  "type": "Microsoft.Network/dnszones",
-  "zoneType": "Public"
-}
-```
-Copy the nameservers array from the response to use the values in your DNS Zone.
-
-### Update a subdomain of your domain with Azure Name Servers
-
-Go to your registrar & edit the DNS zone of your domain as follows : 
-Don’t forget the trailing “.” at the end of the Azure DNS names.
-```
-demo 10800 IN NS ns1-04.azure-dns.com.
-demo 10800 IN NS ns2-04.azure-dns.net.
-demo 10800 IN NS ns3-04.azure-dns.org.
-demo 10800 IN NS ns4-04.azure-dns.info.
-```
-Verify (DNS propagation can take a few minutes, it's usually a matter of seconds these days) : 
-```shell
-~ ➜ dig NS demo.paquerette.com +short
-ns4-04.azure-dns.info.
-ns2-04.azure-dns.net.
-ns3-04.azure-dns.org.
-ns1-04.azure-dns.com.
-```
-
-## Azure regions
-
-Determine in which regions you want to have your two clusters setup
-You'll need to check that you have enough quota to successfully create them.
-
-### Check the current quota
-
-You need 24 CPU in per regions (3 nodes x8 CPUs x 2 regions) 
-
-List all regions : 
-```shell
-az account list-locations --output table
-```
-
-Check two regions that has at least 24 CPU per region
-
-```shell
-az vm list-usage --location francecentral --output table
-az vm list-usage --location ukwest --output table
-```
-Ensure that you have more than 24 in both regions you choose.
-
-Ex:
-```
-Standard Dv3 Family vCPUs                 0               10
-Standard DSv3 Family vCPUs                0               100
-```
-Both regions must support K8S & Identity.
-
-### Edit config.sh
-
-Edit the config.sh with the two regions
-
-```shell
-CLUSTER1=redis-francecentral
-CLUSTER2=redis-ukwest
-```
-
-### Edit the variables.tf with the machine family 
- 
-```
-variable "instance_type" {
-  type        = string
-  default     = "Standard_D8s_v3"
-  description = "Instance type for the AKS cluster"
-}
-```
-DSv3 => D8s_v3 (8: 8vCPU per node)
-
-
-
-## Resource groups
-
-Edit config.sh and define the resource group for the AKS Clusters.
-You should use a different resource group than the DNS_RESOURCE_GROUP, as the cost of DNS is close to 0$, and you can leave it configured _forever_, while AKS will cost quite some money.
-
-Edit config.sh:
-```shell
-CLUSTER_RESOURCE_GROUP=ThomasManson-temp-AKS
-```
-
-**Important**:
-- `CLUSTER_RESOURCE_GROUP`: Contains all AKS infrastructure (temporary, expensive)
-- `DNS_RESOURCE_GROUP`: Contains only the DNS Zone (permanent, almost free)
-
-This separation allows you to delete the AKS clusters after demos while keeping your DNS configuration intact.
-
-## Azure Resource Tags
-
-Edit config.sh to add resource tags for compliance and cost tracking:
-
-```shell
-# Owner tag (format: firstname_lastname, lowercase)
-owner=thomas_manson
-
-# Skip deletion tag (prevents accidental deletion)
-skip_deletion=yes
-```
-
-These tags will be automatically applied to all Azure resources (resource groups and AKS clusters).
-
-## Configuration Summary
-
-Here's a complete overview of all `config.sh` variables:
-
-| Variable | Description | Example | Required |
-|----------|-------------|---------|----------|
-| `CLUSTER_RESOURCE_GROUP` | Resource group for AKS clusters (temporary) | `ThomasManson-temp-AKS` | ✅ Yes |
-| `DNS_RESOURCE_GROUP` | Resource group for DNS Zone (permanent) | `ThomasManson` | ✅ Yes |
-| `AA_DB_NAME` | Active/Active database name | `active-active-db` | ✅ Yes |
-| `CLUSTER1` | Primary cluster name (region 1) | `redis-francecentral` | ✅ Yes |
-| `CLUSTER2` | Secondary cluster name (region 2) | `redis-ukwest` | ✅ Yes |
-| `CLUSTER3` | Optional third cluster | _(leave empty)_ | ❌ No |
-| `DNS_ZONE` | Azure DNS Zone for FQDNs | `demo.paquerette.com` | ✅ Yes |
-| `NS` | Kubernetes namespace for Redis | `rec` | ✅ Yes |
-| `owner` | Owner tag (firstname_lastname) | `thomas_manson` | ✅ Yes |
-| `skip_deletion` | Prevent accidental deletion | `yes` or `no` | ✅ Yes |
-
-# Create the two Redis Enterprise Cluster, set them as Active/Active and create an Active/Active DB
-
-```shell
-./create-all.sh
-```
-The script will create the AKS, Redis Enterprise Cluster & the Database.
-Watch the output to ensure that no error happens during the process.
-You may encounter errors like : not enough quota, Azure Identity Management not available
-
-This script takes about 10 minutes to complete, it spends some time to wait for AKS creation, K8S resource creation and availability...
-
-Upon completion, you have an Active/Active setup with an Active/Active DB setup.
-
-Here is a sample output of the script with cluster information : 
-
-````
-=========================================
-⏱️ Execution Summary:
-• 01-create-cluster.sh           :  4 min 54 sec
-• 02-setup-haproxy.sh            :  4 min 06 sec
-• 03-setup-rerc.sh               :  0 min 03 sec
-• 04-create-active-active-db.sh  :  0 min 04 sec
------------------------------------------
-🔴 Total execution time          :  9 min 07 sec
-=========================================
-
-Switched to context "redis-francecentral".
-##############################################################################################################
-#📍 Cluster Name      : redis-francecentral
-#👤 Username          : account@domain.com
-#🔑 Password          : xxxxxx
-#🌐 FQDN              : rec-redis-francecentral.rec.svc.cluster.local
-#🔌 Connection String : rediss://active-active-db-db.redis-francecentral.demo.paquerette.com:443
-##############################################################################################################
-Switched to context "redis-ukwest".
-##############################################################################################################
-#📍 Cluster Name      : redis-ukwest
-#👤 Username          : account@domain.com
-#🔑 Password          : yyyyyyy
-#🌐 FQDN              : rec-redis-ukwest.rec.svc.cluster.local
-#🔌 Connection String : rediss://active-active-db-db.redis-ukwest.demo.paquerette.com:443
-##############################################################################################################
-````
-
-# Access to Redis Enterprise WebUI
-
-You may need it to access the WebUi for the demo and register your license.
-In case of the license, it needs to be registered on both nodes (this can also be scripted)
-
-## Get credentials
-
-check the output of `./create-all.sh` or run `./05-get-cluster-info.sh` to get username & password
-
-## Create a secure tunnel to the Redis Enterprise WebUI
-
-```shell
-cd /redis-enterprise-testing/
-./webui-cluster1.sh
-```
-
-or
-
-```shell
-cd /redis-enterprise-testing/
-./webui-cluster1.sh
-```
-
-This will create a secure connection, tunnel communication between your browser and Redis Enterprise Web UI.
-It will open your browser to https://localhost:8443 or https://localhost:8444
-
-# License
-
-If you don't have a license the Redis Enterprise will run for 30 days with a max of 4 shards per cluster 
-https://redis.io/docs/latest/operate/rs/clusters/configure/license-keys/
-
-To add a license : 
-* Connect to each of the web console
-  * https://localhost:8443/#/cluster/configuration/general
-  * https://localhost:8444/#/cluster/configuration/general
-* Go to the license tab, click "Change" and paste the license
-* Check that the number of shards increase from 4 to something more.
-
-# Connect Redis Insight to each cluster
-
-Use the connection string printed at the end of the creation of the cluster (or use `./05-get-cluster-info.sh` to get it again)
-
-* Give each a name that include the region
-* paste the connection string 
-  * ex: rediss://active-active-db-db.redis-ukwest.demo.paquerette.com:443
-*  Go to connection settings, security tab, and ensure that both TLS & SNI are checked
-
-# Showcase concurrent writes
-
-```
-cd /redis-enterprise-testing/
-./launch_test.sh
-```
-
-Launch 2 instances of a python programs in the background and wait for their executions to complete.
-Each instance will connect to one region and increment 1000 times a counter.
-After the completion the value of the counter is printed and show 2000.
-
-Arguments : 
-* No argument, the increment will be done without a pipe, which showcase the importance of the latency, the region closer to the client will complete earlier
-* pipe :  pipe the increments, which makes the execution way faster
-* reset : reset the counter to 0 before starting the increments
-
-```
- ./launch_test.sh pipe reset
-🔄 Resetting key...
-🚀 Launching parallel INCR...
-⏳ Waiting for process to finish :  29882, 29883
-🔁 Incrementing key 'counter' 1000 times on active-active-db-db.redis-francecentral.demo.paquerette.com:443 using pipeline mode...
-🔁 Incrementing key 'counter' 1000 times on active-active-db-db.redis-ukwest.demo.paquerette.com:443 using pipeline mode...
-✅ Done for active-active-db-db.redis-francecentral.demo.paquerette.com:443
-✅ Done for active-active-db-db.redis-ukwest.demo.paquerette.com:443
-⏳ Waiting for convergence...
-📥 Reading value from active-active-db-db.redis-francecentral.demo.paquerette.com
-🔎 Key 'counter' on active-active-db-db.redis-francecentral.demo.paquerette.com:443 = 2000
-```
-
-# Continuous Load v1
-
-`cd redis-enterprise-testing/standalone-db/`
-
-* create a simple database
-  * `./01-created-db.sh`
-
-* Run the continuous load : 
-  * `./redeploy.sh`
-
-* Enable HA
-  * `./02-enable-HA.sh`
-* Increase RAM
-  * `./03-db-ram-increase.sh`
-* Increase shard count
-  * `./04-increase-shard-count-db.sh`
-* Upgrade DB from 7.2 to 7.4
-  * `./05-upgrade-db-to-last-version.sh`
-
-* delete the db (in case you need to rerun)
-  * `./06-delete-db.sh`
-
-## Troubleshooting
-
-### Collecting logs
-
-```shell
-cd ./redis-enterprise-testing/
-./check-redis-enterprise-on-azure.sh
-```
-
-Would collect logs and k8s resource statuses from various components of the setup in `./logs` folder.
-
-Alternatively you can use Log Collector as described here: https://docs.redis.com/latest/kubernetes/logs/collect-logs/
-
-## Web Dashboard
-
-![alt text](images/flask_app.png)
-
-To enable Web UI for the demo run:
-```
-./launch-flask-console.sh
-```
-and point your browser to `http://localhost:5000/`
-
-
-## Testing access to the cluster
-
-Adjust test.py file to use selected regions and dns name:
-
-Run test:
-```
-cd ./redis-enterprise-testing/
-./launch_test.sh
-```
-This simple test connects to Redis DB endpoints in both regions and measure:
-- avg ping time for endpoints in both regions
-- replication speed between the regions
-- Speed of setting large (6Mb keys)
-
-While it's possible to execute this test on your own laptop, 
-it is recommended to run it in the region, designated as "region1". 
-It would demonstrate difference in the response (ping) time between local and remote region and will test large keys with the local region.
-
-To test access from the redis command line `redis-cli` use:
-```
-cd ./redis-enterprise-testing/
-./cli-cluster1.sh
-or
-./cli-cluster2.sh
-```
-
-or use Redis Insight.
-
-You can execute commands such as:
-```
-# run in francecentral
-set hello-from france
-
-# run in ukwest
-get hello-from
-france 
-```
-
-## Testing High Availability and Disaster Recovery
-
-The `chaos.sh` script automates the full workflow for testing Redis Enterprise in Active-Active configuration across AKS regions.
-
-To launch the scenario:
+## 1.2 Configure: one file, `config.sh`
 
 ```bash
-./chaos.sh
+cp config.example.sh config.sh     # your personal values; config.sh is gitignored, only config.example.sh is tracked
+$EDITOR config.sh                  # set CLOUD_PROVIDER, the block of your cloud, owner, DNS zone
+./scripts/verify-config.sh all     # proves config.sh satisfies every Terraform variable (no cloud needed)
 ```
 
-The script performs a sequence of failure and recovery operations automatically, pausing at each step to allow the user to observe system behavior or interact with RedisInsight or a web dashboard app.
+`config.sh` is the **single source of truth** (no `.tfvars`, no defaults in Terraform): a missing value
+fails loudly instead of silently using another one. Every cloud resource is tagged `owner`
+(`firstname_lastname`) and `skip_deletion` (`yes`/`no`) — [`./check-tags.sh`](#16-cleanup) audits them.
 
-> 💡 Tip: Before starting, ensure that the web dashboard application (`flask/app.py`) is running. This helps visualize data availability and failover in real time.
+## 1.3 Up and down
+
+Each cloud has one entry point at the repository root. They all behave the same way:
+
+```bash
+./<cloud>-deploy.sh --plan-only    # preflight + plan. Changes NOTHING. Run this first.
+./<cloud>-deploy.sh                # ONE COMMAND UP
+./<cloud>-deploy.sh --destroy      # ONE COMMAND DOWN
+```
+
+The **preflight** refuses to touch the cloud unless tools, credentials, APIs, regions, machine types,
+the DNS zone and `config.sh` are all fine, and says *"nothing was changed"* when it stops. There is
+**no confirmation prompt** (the environment is disposable). Everything is logged in `debug/`
+(gitignored): `./scripts/logs.sh last`, `./scripts/logs.sh errors`.
+
+The deployment is a pipeline, each step also runnable on its own from `scripts/`:
+
+| Step | Does |
+|---|---|
+| `01-create-cluster.sh` | OpenTofu: VPC/network, two clusters, node pools |
+| `02-setup-haproxy.sh` (+ `02a-setup-cluster.sh`, one per cluster **in parallel**) | HAProxy ingress, Redis Enterprise operator, REC, wildcard DNS |
+| `03-setup-rerc.sh` | Trust between the two Redis Enterprise clusters (RERC) |
+| `04-create-active-active-db.sh` | The Active-Active database; enables client access (see 1.4) |
+| `05-get-cluster-info.sh` | Prints URLs, credentials and ready-to-paste commands |
+
+## 1.4 Reach the database and the console
+
+```bash
+./scripts/05-get-cluster-info.sh   # URLs, username, passwords, the database connection string, a redis-cli command
+```
+
+The database listens behind an HAProxy ingress that routes **by SNI** over TLS passthrough, so every client must send the host name:
+
+```bash
+redis-cli --insecure --sni <db-host> -u 'rediss://default:<password>@<db-host>:443' PING
+```
+
+* The user is **`default`** (an empty user name gives `WRONGPASS`). The password is generated at deployment and printed by step 05.
+* In Redis Insight, tick **TLS** and **SNI** in the connection's security tab.
+* Client-certificate enforcement is switched off on the database by step 04 (it is on by default and blocks plain TLS clients).
+* The Redis Enterprise admin UI is not published; open it through tunnels: `./scripts/webui.sh` (cluster 1 → <https://localhost:8443>, cluster 2 → <https://localhost:8444>; Ctrl-C closes them).
+* Inspect the clusters: `./scripts/k9s-cluster.sh 1`, `./scripts/rladmin.sh --both`, `kubectl --context <cluster> -n rec get rec,rerc,reaadb`.
+* A license can be pasted in each admin UI (*Cluster → Configuration → General → License → Change*).
+
+Security model: the demo must be reachable from anywhere, so there are no private clusters or IP
+allow-lists; protection is TLS + passwords + least-privilege cloud roles — see
+[ADR 0010](docs/adr/0010-demo-accessibility-over-network-isolation.md).
+
+## 1.5 Show it: load, console and chaos
+
+**Concurrent writes** (two clients, one per region, 1000 increments each, the counter ends at 2000):
+
+```bash
+cd redis-enterprise-testing && ./install-python-reqs-for-test.sh
+./launch_test.sh pipe reset        # no arguments = no pipelining; "reset" zeroes the counter first
+```
+
+**The chaos console** — a read-only web page for screen sharing: both clusters' health, the primary
+node, the Active-Active database and its sync links, what the running scenario simulates and what to expect.
+
+```bash
+./chaos-webui-start.sh        # http://127.0.0.1:5050/   (logs: debug/chaos-webui-*.log, never in your terminal)
+./chaos-webui-stop.sh
+```
+
+*Optional Redis logo:* it is a trademark asset, so it is not in the repo. Download `Redis_Logo_Red_RGB.svg`
+from <https://brand.redis.io/document/18> and save it as `flask/static/brand/Redis_Logo_Red_RGB.svg` (gitignored).
+
+**The chaos harness**: `scripts/chaos.sh` (GCP and Azure; AWS not supported yet).
+
+```bash
+./scripts/chaos.sh --check-only                # health gate of BOTH clusters; injects nothing
+./scripts/chaos.sh --list                      # pod, node, region, region-recover
+./scripts/chaos.sh                             # pod, node, region — pauses before each step (the presenter drives)
+./scripts/chaos.sh --scenario node             # one scenario (several: --scenario pod,node)
+./scripts/chaos.sh --no-prompt                 # unattended (the region stays down only a few seconds)
+./scripts/chaos.sh --scenario pod --pod 0      # force the victim (index or pod name)
+./scripts/chaos.sh --scenario region-recover   # resume after an interruption
+```
+
+| Scenario | What it breaks | Measured on GCP |
+|---|---|---|
+| `pod` | force-deletes one Redis Enterprise pod (a node that is neither the cluster primary nor the endpoint holder) | recovered in ≈ 50 s |
+| `node` | hard-resets the VM under that pod | ≈ 4–5 min |
+| `region` | removes **every node** of one cluster, checks the other region keeps serving, restores the nodes, then runs the REC cluster recovery and `rladmin recover all` | ≈ 7 min |
+| `region-recover` | the recovery half of `region`, to finish after an interruption | ≈ 3 min |
+
+Good to know:
+
+* A **health gate** runs first (cloud login, both clusters, REC, RERC, the Active-Active database, a write/read across both regions). If it fails the run stops with **exit 3** and says what to fix. If your cloud login lapsed it prints the command (`gcloud auth login …`).
+* The outage is **verified**, not assumed: after `region` the harness insists on **0 Kubernetes nodes**, otherwise the run fails and restores the node pool.
+* **Audit trail** for each run in `debug/`: `chaos-<ts>.log` (every command with start/end/exit code, state samples, `kubectl`/`rladmin`/`crdb-cli` snapshots, operator logs) and `chaos-<ts>.events.jsonl` (machine-readable timeline).
+* The console is optional: without it `chaos.sh` carries on.
+* Exit codes: `0` ok · `1` a check failed · `2` bad usage · `3` health gate failed.
+
+## 1.6 Cleanup
+
+```bash
+./<cloud>-deploy.sh --destroy      # namespaces, Helm releases, DNS records, then the infrastructure
+./check-tags.sh                    # audit: nothing tagged to you should remain
+```
+
+Do not leave it running: two clusters of 3 × 8 vCPU cost real money.
+
+## 1.7 Tests (no cloud needed)
+
+```bash
+./tests/run.sh          # pytest + node tests + shell tests with stubbed kubectl/gcloud/curl + shellcheck + ruff
+./tests/run.sh shell    # one group: py | js | shell | lint
+```
+
+Needs `uv`, a recent `node`, `shellcheck`, `ruff`. The tests never contact a cloud.
+
+## 1.8 Troubleshooting
+
+| Symptom | Likely cause | What to do |
+|---|---|---|
+| `gcloud` errors such as *Reauthentication failed* | the CLI login expired | `gcloud auth login` (also `gcloud auth application-default login` for OpenTofu) |
+| `tofu plan` works but `gcloud` returns 403 (or the opposite) | the CLI account and the application-default credentials are two different identities | align both; details in [`docs/deployment.md`](docs/deployment.md) |
+| *no managed zone for …* in the preflight | wrong DNS zone name or project | the preflight lists the zones that exist: copy the right one into `config.sh` |
+| `redis-cli`: *certificate verify failed* / `Protocol error, got "H"` | no SNI, or the certificate is self-signed | use `--insecure --sni <host>` |
+| `WRONGPASS` | empty user name | use `default:<password>@` |
+| `FATAL: bash 5+ is required` | the `bash` first in your `PATH` is macOS's 3.2 | `brew install bash` and put `/opt/homebrew/bin` first in `PATH` |
+| `chaos.sh` exits 3 | the health gate found a problem | read the ❌ lines (each has a hint) and the log in `debug/` |
+| Redis pods stuck at `1/2` after a chaos run, `rladmin` unreachable | the REC lost its quorum | `./scripts/chaos.sh --scenario region-recover` |
+| a command hangs on `kubectl get pods -w` | it is a watch | Ctrl-C |
+| Collect everything for a bug report | | `./scripts/get-logs.sh --archive` (writes `debug/diag-<ts>/`) |
 
 ---
 
-### 🔁 What the script does — step by step (with key commands explained)
+# Part 2 — One section per cloud
 
-1. **Select a region**
+<a id="gcp-gke"></a>
+## GCP (GKE)
 
-   You are prompted to choose a region (e.g., `redis-francecentral`, `redis-ukwest`) where chaos will be applied. This determines which AKS cluster the operations will target.
+**Status: validated end to end.** Two regional GKE clusters (3 zones, 1 node per zone, `n1-standard-8`),
+one VPC, Cloud DNS records, node pools created inline with the cluster.
 
-2. **Switch Kubernetes context to the selected AKS cluster**
+**Before the first run**
 
+1. A GCP project with billing, and quota for 24 vCPU in each of the two regions.
+2. A **Cloud DNS managed zone** for the sub-domain you chose, delegated at your registrar
+   (`gcloud dns managed-zones create redis-demo --dns-name=<zone>. --description=demo`, then add the `NS` records it prints at your registrar; check with `dig NS <zone> +short`).
+3. Log in twice (they are two credentials): `gcloud auth login` and `gcloud auth application-default login`.
+4. In `config.sh`: `CLOUD_PROVIDER=gcp`, `GCP_PROJECT_ID`, `GCP_ACCOUNT`, `GCP_DNS_ZONE`, `CLUSTER_PREFIX` (unique per person on a shared project), `owner`, `skip_deletion`.
+5. **Once per project, as an IAM admin** (never as the deploy identity): create the least-privilege node service account and grant the deploy identity its roles — see [`docs/gcp-iam.md`](docs/gcp-iam.md).
    ```bash
-   kubectl config use-context redis-francecentral
+   ./gcp-setup.sh --dry-run     # read what it would change
+   ./gcp-setup.sh               # idempotent; also enables the required APIs
    ```
 
-   This ensures that subsequent `kubectl` commands apply to the correct Kubernetes cluster.
+**Run**
 
-3. **Show the nodes of the cluster**
+```bash
+./gcp-deploy.sh --plan-only      # review
+./gcp-deploy.sh                  # ≈ 13 min; ends with the connection details (step 05)
+./scripts/chaos.sh --check-only  # everything green? then the demo is ready
+./gcp-deploy.sh --destroy        # ≈ 15 min
+./check-tags.sh                  # GCP cannot label networks/firewalls: the audit also sweeps by name via Cloud Asset
+```
 
+Notes: GKE node-pool operations can be slow (up to an hour on GCP's side), hence `GCP_CLUSTER_TIMEOUT=90m`.
+`./scripts/diagnose-gcp.sh` prints the raw errors the preflight condenses and ends with a real `tofu plan`.
+Chaos on GCP: the `region` scenario resizes the node pool to 0 (autoscaling off first) and force-deletes the
+Redis Enterprise pods, whose termination grace period is one year.
+
+<a id="aws-eks"></a>
+## AWS (EKS)
+
+**Status: not verified.** `providers/aws` passes `tofu validate` and the pipeline is provider-agnostic, but
+nothing has been applied. Known gaps (tracked in [`docs/TODO.md`](docs/TODO.md), milestone 3):
+
+* ELBs publish a **hostname**, not an IP: `common/dns-aws.sh` must create a CNAME instead of an A record.
+* The EBS CSI driver is not installed (Redis Enterprise needs persistent volumes).
+* `chaos.sh` does not support AWS yet.
+
+Expected flow once those are done: Route 53 hosted zone delegated at your registrar → `config.sh` with
+`CLOUD_PROVIDER=aws` and the `AWS_*` block → `aws sso login` (or your profile) → `./aws-deploy.sh --plan-only` → `./aws-deploy.sh`.
+
+<a id="azure-aks"></a>
+## Azure (AKS)
+
+**Status: worked before the multi-cloud rework, not re-verified since.** `./azure-deploy.sh` is the entry
+point; the pipeline steps are shared with GCP, so expect to fix small things. If you run it, please note
+what you find in [`docs/TODO.md`](docs/TODO.md) (L1).
+
+**Before the first run**
+
+1. `az login`, then `az account show --query id -o tsv` (the subscription ID, set as `AZURE_SUBSCRIPTION_ID` if you have several).
+2. **DNS zone.** Redis Active-Active needs FQDNs. Take a domain you own (here `paquerette.com`) and delegate a sub-domain (`demo.paquerette.com`) to Azure:
    ```bash
-   kubectl get nodes
+   az network dns zone create --resource-group <DNS_RESOURCE_GROUP> --name demo.paquerette.com
    ```
+   Copy the four `nameServers` from the answer into `NS` records of `demo` at your registrar
+   (with the trailing dot), then check: `dig NS demo.paquerette.com +short` should list the four Azure servers.
+   Keep this resource group apart from the cluster one: DNS costs almost nothing and can stay forever,
+   the clusters cannot.
+3. **Quota**: 24 vCPU per region (3 nodes × 8 vCPU) in two regions that support AKS and managed identities:
+   `az vm list-usage --location francecentral --output table` (`Standard DSv3 Family vCPUs` must show room).
+4. In `config.sh` (the `AZURE_*` block): `CLOUD_PROVIDER=azure`, `AZURE_REGION1/2`, `AZURE_INSTANCE_TYPE` (`Standard_D8s_v3` = 8 vCPU),
+   `AZURE_CLUSTER_RESOURCE_GROUP` (temporary, expensive), `AZURE_DNS_RESOURCE_GROUP` (permanent, almost free), `AZURE_DNS_ZONE`, `owner`, `skip_deletion`.
 
-   Used to display the AKS worker nodes hosting Redis Enterprise pods.
+**Run**
 
-4. **Simulate a Kubernetes-level failure**
+```bash
+./azure-deploy.sh --plan-only
+./azure-deploy.sh                 # about 10 minutes the last time it was measured
+./azure-deploy.sh --destroy
+```
 
-   ```bash
-   kubectl delete pod rec-redis-francecentral-0 -n rec --force
-   ```
-
-   This forcibly deletes a Redis pod. Kubernetes should automatically reschedule a new one. Redis Enterprise handles this transparently if replication is working correctly.
-
-5. **Wait until the Redis cluster recovers**
-
-   The script monitors the number and status of pods, and checks Redis cluster health via:
-
-   ```bash
-   kubectl exec -n rec rec-redis-francecentral-0 -- rladmin status
-   ```
-
-6. **Simulate a VM-level failure (node restart)**
-
-   ```bash
-   az vmss restart --name VMSS_NAME --resource-group CLUSTER_RESOURCE_GROUP --instance-ids 1
-   ```
-
-   This restarts one of the underlying Virtual Machine Scale Set instances where Redis runs. The expectation is that Redis replication will prevent any impact to the application.
-
-7. **Wait for all pods to return and Redis to be healthy**
-
-   Same health check as step 5.
-
-8. **Simulate a regional outage**
-
-   ```bash
-   az aks stop --name redis-francecentral --resource-group CLUSTER_RESOURCE_GROUP
-   ```
-
-   This stops the AKS cluster entirely — simulating a full region outage (network loss, power cut, etc.).
-
-   While this region is down, your application should continue working using the other Redis Enterprise region.
-
-9. **Restart the AKS cluster after some time**
-
-   ```bash
-   az aks start --name redis-francecentral --resource-group CLUSTER_RESOURCE_GROUP
-   ```
-
-   This brings the cluster back online.
-
-10. **Recover the Redis Enterprise cluster object after quorum loss**
-
-  ```bash
-  kubectl -n rec patch rec rec-redis-francecentral --type merge --patch '{"spec":{"clusterRecovery":true}}'
-  ```
-  
-  Redis Enterprise detects a quorum loss during the outage. This command explicitly tells Redis to rejoin and rebuild the cluster metadata.
-  
-  You can monitor its recovery with:
-  
-  ```bash
-  watch "kubectl -n rec describe rec | grep State"
-  ```
-  
-  Wait until the state is `Running`.
-
-11. **Recover databases on the recovered region**
-
-  ```bash
-  kubectl exec -it -n rec rec-redis-francecentral-0 -- rladmin recover all
-  ```
-  
-  Once the cluster object is back online, this command tells Redis to rejoin the database replication and resync data.
-  
-  ---
-
-  ✅ After Recovery
-  
-  Once all steps are completed:
-  
-  * Check data availability from both regions
-  * Validate that changes made during the outage (on the healthy region) are visible in the recovered region
+Chaos on Azure: `node` restarts a VMSS instance (`az vmss restart`), `region` stops the AKS cluster (`az aks stop` / `az aks start`).
 
 ---
 
-The following table summary of potential outage types:
+# Credits and backlog
 
-![alt text](images/outages.png)
+Based on the work by [antonum](https://github.com/antonum/AKS-ActiveActive-Redis). This fork adds: one-command
+multi-cloud deployment driven by `config.sh`, OpenTofu, a parallel installation step, a health-gated chaos
+harness with an audit trail, the chaos web console, and a credential-free test suite.
 
-
-# Don't forget to delete the whole setup
-
-Save the planet 🌍 and some 💸
-
-```
-./delete-all-resources.sh
-
-...
-Destroy complete! Resources: 3 destroyed.
-Cleaning up Redis-related Kubernetes resources...
-⛔ Deleting namespace rec in cluster redis-francecentral...
-⛔ Deleting ingress-controller namespace in cluster redis-francecentral...
-⛔ Forcing Helm uninstall of haproxy-ingress (if still tracked) in redis-francecentral...
-⛔ Deleting namespace rec in cluster redis-ukwest...
-⛔ Deleting ingress-controller namespace in cluster redis-ukwest...
-⛔ Forcing Helm uninstall of haproxy-ingress (if still tracked) in redis-ukwest...
-Cleaning up DNS entries in Azure...
-Cleanup complete.
-=========================================
-⏱️ Total execution time: 6 minutes
-=========================================
-```
-
-# Credits
-This project is based on the work by [antonum](https://github.com/antonum/AKS-ActiveActive-Redis).
-
- * Improvement on the scripting so that the cluster can be created in one run, with improved wait() to ensure resource creation on K8S
- * Added an image to deploy on K8S to continuously query the DB while it's being scaled up/out
- * Improve the use of variables so that it relies on config.sh only
- * chaos.sh : automate every action for HA testing, using config.sh
- * Some reorganisation, new scripts created for ease of use
- * Switch to opentofu
-
-
-# Todo
- * JSON & Search on Active/Active DB
- * Rackzone awareness
- * Flash
+Backlog: [`docs/TODO.md`](docs/TODO.md). Ideas: JSON & Search on Active-Active, rack-zone awareness, Redis Flex.

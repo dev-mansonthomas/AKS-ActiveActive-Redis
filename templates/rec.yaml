@@ -1,7 +1,7 @@
 apiVersion: app.redislabs.com/v1
 kind: RedisEnterpriseCluster
 metadata:
-  name: rec-CLUSTER
+  name: {{REC_NAME}}
 spec:
   # Add fields here
 #  rackAwarenessNodeLabel: "topology.kubernetes.io/zone"
@@ -9,17 +9,17 @@ spec:
 #    enabled: true
 #    storageClassName: managed-premium
   ingressOrRouteSpec:
-    apiFqdnUrl: api.CLUSTER.DNS_ZONE
-    dbFqdnSuffix: -db.CLUSTER.DNS_ZONE
+    apiFqdnUrl: api.{{REC_NAME}}.{{DNS_ZONE}}
+    dbFqdnSuffix: -db.{{REC_NAME}}.{{DNS_ZONE}}
     ingressAnnotations:
       haproxy-ingress.github.io/ssl-passthrough: "true"
       kubernetes.io/ingress.class: haproxy
     method: ingress
-  nodes: 3
+  nodes: {{RE_NODES}}
   redisEnterpriseNodeResources:
     limits:
-      cpu: 4000m
-      memory: 16Gi
+      cpu: {{RE_CPU}}
+      memory: {{RE_MEMORY}}
     requests:
-      cpu: 4000m
-      memory: 16Gi
+      cpu: {{RE_CPU}}
+      memory: {{RE_MEMORY}}

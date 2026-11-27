@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# curl stub: records the JSON body of chaos events; answers 204 to POSTs, and "healthy" to anything else.
+D="${STUB_DIR:?}"
+body=""; want_code=0; args=("$@")
+for ((i = 0; i < ${#args[@]}; i++)); do
+  case "${args[$i]}" in -d) body="${args[$((i + 1))]}" ;; -w) want_code=1 ;; esac
+done
+if [ -n "$body" ]; then
+  printf '%s\n' "$body" >> "$D/events.log"; echo "EVENT $body" >> "$D/order.log"
+  [ -z "${STUB_CURL_DOWN:-}" ] || exit 7
+  [ "$want_code" -eq 1 ] && printf '204'
+  exit 0
+fi
+[ -z "${STUB_CONSOLE_DOWN:-}" ] || exit 7
+exit 0

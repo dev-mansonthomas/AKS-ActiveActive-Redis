@@ -3,7 +3,16 @@ set -e
 USE_RESET=false
 USE_PIPE=false
 
-. ../config.sh
+_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../common/lib.sh"
+# shellcheck source=../common/lib.sh
+. "$_LIB" || { echo "FATAL: failed to load $_LIB" >&2; exit 1; }
+re_load_config
+cd "$(dirname "${BASH_SOURCE[0]}")" || exit 1   # incr_key.py / get_key.py live here
+re_cloud_select_account
+# Password of the Active-Active DB (empty = no password). Exported so the python
+# helpers read it from the environment instead of argv.
+REDIS_PASSWORD="$(re_aa_db_password "$CLUSTER1")"
+export REDIS_PASSWORD
 
 for arg in "$@"; do
   case "$arg" in
@@ -15,17 +24,17 @@ done
 KEY="counter"
 COUNT1=1000
 COUNT2=1000
-HOST1="${AA_DB_NAME}-db.${CLUSTER1}.${DNS_ZONE}"
-HOST2="${AA_DB_NAME}-db.${CLUSTER2}.${DNS_ZONE}"
-if [ -n "$CLUSTER3" ]; then
-  HOST3="${AA_DB_NAME}-db.${CLUSTER3}.${DNS_ZONE}"
+HOST1="${AA_DB_NAME}-db.${REC_NAME1}.${DNS_ZONE}"
+HOST2="${AA_DB_NAME}-db.${REC_NAME2}.${DNS_ZONE}"
+if [ -n "${REC_NAME3:-}" ]; then
+  HOST3="${AA_DB_NAME}-db.${REC_NAME3}.${DNS_ZONE}"
 fi
 PORT=443
 
 # Reset key (optional)
 if $USE_RESET; then
   echo "🔄 Resetting key..."
-  python3 -c "import redis; r=redis.Redis(host='$HOST1', port=$PORT, ssl=True, ssl_cert_reqs=None); r.delete('$KEY')"
+  python3 -c "import redis; import os; r=redis.Redis(host='$HOST1', port=$PORT, ssl=True, ssl_cert_reqs=None, password=os.environ.get('REDIS_PASSWORD') or None); r.delete('$KEY')"
 fi
 # Launch increments in background
 echo "🚀 Launching parallel INCR..."

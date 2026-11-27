@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+D="${STUB_DIR:?}"
+echo "gcloud $*" >> "$D/calls.log"
+case "$*" in
+  *"node-pools describe"*) printf 'RUNNING\tTrue\n' ;;
+  *"clusters resize"*"--num-nodes 0"*) [ -n "${STUB_REGION_NOEFFECT:-}" ] || touch "$D/pool0" ;;
+  *"clusters resize"*) [ -n "${STUB_POOL_STUCK:-}" ] || rm -f "$D/pool0" ;;
+  *"compute instances list"*) [ -e "$D/pool0" ] || printf 'gke-x-aaaa\ngke-x-bbbb\ngke-x-cccc\n' ;;
+  *"print-access-token"*) [ -z "${STUB_GCLOUD_UNAUTH:-}" ] || { echo "Reauthentication required" >&2; exit 1; }; echo tok ;;
+  *"auth list"*) echo "tester@example.com" ;;
+  *"config get"*) echo "tester@example.com" ;;
+  *) : ;;
+esac
+exit 0

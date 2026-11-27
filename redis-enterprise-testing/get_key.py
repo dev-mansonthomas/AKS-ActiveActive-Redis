@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import os
 import sys
 import redis
 
@@ -13,6 +14,7 @@ key = sys.argv[3]
 r = redis.Redis(
     host=host,
     port=port,
+    password=os.environ.get("REDIS_PASSWORD") or None,  # env, never argv (visible in ps)
     ssl=True,
     ssl_cert_reqs=None,
     ssl_ca_certs=None

@@ -1,3 +1,12 @@
+terraform {
+  required_version = ">= 1.6"
+  required_providers {
+    azurerm = {
+      source  = "hashicorp/azurerm"
+      version = "~> 5.4"
+    }
+  }
+}
 
 provider "azurerm" {
   features {}
@@ -22,6 +31,12 @@ resource "azurerm_kubernetes_cluster" "k8s1" {
 
   identity {
     type = "SystemAssigned"
+  }
+
+  # Required from azurerm 5.x. "Manual" preserves the explicit default_node_pool
+  # below (as opposed to "Auto" = AKS Node Auto Provisioning / Karpenter).
+  node_provisioning_profile {
+    mode = "Manual"
   }
 
   default_node_pool {
@@ -49,6 +64,12 @@ resource "azurerm_kubernetes_cluster" "k8s2" {
 
   identity {
     type = "SystemAssigned"
+  }
+
+  # Required from azurerm 5.x. "Manual" preserves the explicit default_node_pool
+  # below (as opposed to "Auto" = AKS Node Auto Provisioning / Karpenter).
+  node_provisioning_profile {
+    mode = "Manual"
   }
 
   default_node_pool {

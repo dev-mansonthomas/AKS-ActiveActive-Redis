@@ -7,6 +7,10 @@ __pycache__/
 logs/*
 !logs/.gitkeep
 
+# Deployment / run logs and collected diagnostics (see common/lib.sh, scripts/get-logs.sh)
+debug/*
+!debug/.gitkeep
+
 # Terraform
 .terraform/
 *.tfstate
@@ -17,8 +21,14 @@ logs/*
 
 #project specific
 
+# Personal deployment values (project, account, DNS zone, owner): copy config.example.sh to config.sh
+config.sh
+
 #Générated yaml
 yaml/*
 
 .DS_Store
 nohup.out
+flask/tests/.logs/
+# Redis logo = trademark asset, downloaded by hand from brand.redis.io (see README)
+flask/static/brand/
