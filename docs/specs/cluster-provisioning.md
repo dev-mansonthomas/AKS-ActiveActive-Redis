@@ -11,6 +11,7 @@
 - Regional clusters with explicit `node_locations` (3 zones, `GCP_NODE_COUNT` is **per zone**); autoscaling `GCP_NODE_MIN_COUNT..MAX_COUNT`.
 - Nodes run as a dedicated least-privilege service account (`GCP_NODE_SERVICE_ACCOUNT`, `docs/gcp-iam.md`); the deploy identity may only `actAs` that account.
 - `GCP_CLUSTER_TIMEOUT` (default config `90m`): GKE node-pool operations regularly exceed the provider's 40 min default.
+- **`clusters` variable (2026-11-27, ADR 0015):** `set(string)` (`["1","2"]` default of the scripts, or one of them) drives `count` on the two subnets and the two clusters; `moved {}` blocks keep an existing state a no-op. Exported as `TF_VAR_clusters` from `RE_CLUSTERS` (`gcp-deploy.sh --single`). AWS and Azure `main.tf` are unchanged (always two clusters).
 - Measured 2026-11-25..27: whole deploy ≈ 13 min, of which cluster creation ≈ 4–5 min.
 
 ## Purpose

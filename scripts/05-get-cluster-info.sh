@@ -38,11 +38,12 @@ case "${1:-}" in
 esac
 
 re_load_config
+re_resolve_clusters   # run alone: the clusters the Terraform state holds, not a stale kubeconfig context
 re_log_init "05-get-cluster-info"
 
-i=1
-for PAIR in "$CLUSTER1:$REC_NAME1" "$CLUSTER2:$REC_NAME2"; do
-  CLUSTER="${PAIR%%:*}"; REC_NAME="${PAIR##*:}"
+# RE_CLUSTERS (gcp-deploy.sh --single) limits this to the cluster that was deployed.
+for i in $(re_selected_indexes); do
+  CLUSTER="$(re_cluster_name "$i")"; REC_NAME="$(re_rec_name "$i")"
   SECRET="$REC_NAME"
 
   USERNAME=$(kubectl --context="$CLUSTER" -n "$NS" get secret "$SECRET" \
@@ -52,7 +53,6 @@ for PAIR in "$CLUSTER1:$REC_NAME1" "$CLUSTER2:$REC_NAME2"; do
 
   if [ -z "$USERNAME" ]; then
     re_warn "$CLUSTER: secret '$SECRET' not found in namespace '$NS' — is the REC ready?"
-    i=$((i + 1))
     continue
   fi
 
@@ -95,12 +95,14 @@ for PAIR in "$CLUSTER1:$REC_NAME1" "$CLUSTER2:$REC_NAME2"; do
     echo "#🔌 Connection String : rediss://default:$SHOWN_DB_PASSWORD@$DB_URL:443"
     echo "#⌨️  redis-cli         : redis-cli --insecure --sni $DB_URL -u 'rediss://default:$SHOWN_DB_PASSWORD@$DB_URL:443'"
   else
-    re_warn "no database ingress host found for $CLUSTER (AA DB not ready?)"
+    if re_is_single; then
+      echo "#🗄  Database          : none (single-cluster deployment: create yours on this REC)"
+    else
+      re_warn "no database ingress host found for $CLUSTER (AA DB not ready?)"
+    fi
   fi
   [ -n "$API_URL" ] && echo "#🛠  REST API / UI     : https://$API_URL"
   echo "#🖥  RE UI access      : ./scripts/webui.sh ${i}"
   echo "##############################################################################################################"
-
-  i=$((i + 1))
 done
 

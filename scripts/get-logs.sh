@@ -47,7 +47,13 @@ BUNDLE="$DEBUG_DIR/diag-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$BUNDLE"
 re_log "📦 Collecting into ${BUNDLE#"$REPO_ROOT"/}"
 
-CLUSTERS="${ONLY_CLUSTER:-$CLUSTER1 $CLUSTER2}"
+re_resolve_clusters
+if [ -n "${ONLY_CLUSTER:-}" ]; then
+  CLUSTERS="$ONLY_CLUSTER"
+else
+  CLUSTERS=""
+  for _i in $(re_selected_indexes); do CLUSTERS="$CLUSTERS $(re_cluster_name "$_i")"; done
+fi
 
 # --- capture <file> <command...> : run, store, never abort the collection ----
 capture() {

@@ -262,8 +262,13 @@ cloud_preflight() {
   fi
 
   # Regions + machine type availability.
-  local region zone
-  for region in "$GCP_REGION1" "$GCP_REGION2"; do
+  local region zone idx sel_regions="" sel_clusters="" sel_pairs=""
+  for idx in $(re_selected_indexes); do   # only the cluster(s) of this run (--single)
+    sel_regions="$sel_regions $(re_region_of "$idx")"
+    sel_clusters="$sel_clusters $(re_cluster_name "$idx")"
+    sel_pairs="$sel_pairs $(re_cluster_name "$idx"):$(re_region_of "$idx")"
+  done
+  for region in $sel_regions; do
     # Machine types are zonal. Listing them all and filtering client-side takes
     # ~30s per region; describing one in a single zone of that region is ~1s.
     cloud_q gcloud compute zones list --project "$GCP_PROJECT_ID" \
@@ -315,7 +320,7 @@ cloud_preflight() {
       re_warn "       --description='Redis AA demo' --project $GCP_PROJECT_ID"
       re_warn "     ...then delegate ${DNS_ZONE} to its name servers at your registrar."
     fi
-    re_warn "     Active/Active identifies clusters by FQDN, so this is mandatory."
+    re_warn "     Redis Enterprise identifies clusters and databases by FQDN, so this is mandatory."
     fail=$((fail + 1))
   fi
 
@@ -413,7 +418,7 @@ cloud_preflight() {
   # from CLUSTER_PREFIX + region, so a long prefix or a long region name (e.g.
   # southamerica-east1) silently overflows and apply fails after minutes.
   local longest=0 offender="" n len
-  for n in "$CLUSTER1" "$CLUSTER2" "$CLUSTER1-nodes" "$CLUSTER2-nodes"; do
+  for n in $sel_clusters $(for c in $sel_clusters; do printf '%s-nodes ' "$c"; done); do
     len=${#n}
     if [ "$len" -gt "$longest" ]; then longest=$len; offender="$n"; fi
   done
@@ -459,7 +464,7 @@ cloud_preflight() {
     done
 
     local pair cl rg
-    for pair in "$CLUSTER1:$GCP_REGION1" "$CLUSTER2:$GCP_REGION2"; do
+    for pair in $sel_pairs; do
       cl="${pair%%:*}"; rg="${pair##*:}"
       cloud_q gcloud container clusters describe "$cl" --region "$rg" \
         --project "$GCP_PROJECT_ID" --format=value\(name\)
@@ -493,7 +498,7 @@ cloud_preflight() {
     fi
   fi
 
-  re_log "  ℹ️  planned footprint: 2 clusters x $GCP_NODE_COUNT x $GCP_INSTANCE_TYPE"
+  re_log "  ℹ️  planned footprint: $(echo "$sel_clusters" | wc -w | tr -d ' ') cluster(s) x $GCP_NODE_COUNT (per zone) x $GCP_INSTANCE_TYPE"
   re_log "     (autoscaling $GCP_NODE_MIN_COUNT-$GCP_NODE_MAX_COUNT per pool)"
 
   if [ "${_AUTH_BROKEN:-0}" -eq 1 ]; then

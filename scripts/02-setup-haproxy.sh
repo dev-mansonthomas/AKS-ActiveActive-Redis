@@ -68,7 +68,9 @@ SETUP_CLUSTER="$SCRIPT_DIR/02a-setup-cluster.sh"
 [ -r "$SETUP_CLUSTER" ] || re_die "missing $SETUP_CLUSTER"
 
 PIDS=(); NAMES=()
-for PAIR in "$CLUSTER1:$REC_NAME1" "$CLUSTER2:$REC_NAME2"; do
+PAIRS=()
+for IDX in $(re_selected_indexes); do PAIRS+=("$(re_cluster_name "$IDX"):$(re_rec_name "$IDX")"); done   # one pair with --single
+for PAIR in "${PAIRS[@]}"; do
   CLUSTER="${PAIR%%:*}"; REC_NAME="${PAIR##*:}"
   re_log "🚀 starting $REC_NAME on $CLUSTER  (own log: debug/02a-setup-$REC_NAME-*.log)"
   (
@@ -94,7 +96,8 @@ done
 # Verify DNS actually resolves before step 03 relies on it
 # ============================================================================
 re_log "🔎 Checking DNS resolution"
-for REC_NAME in "$REC_NAME1" "$REC_NAME2"; do
+for PAIR in "${PAIRS[@]}"; do
+  REC_NAME="${PAIR##*:}"
   host="api.$REC_NAME.$DNS_ZONE"
   if command -v dig >/dev/null 2>&1; then
     if [ -n "$(dig +short "$host" 2>/dev/null)" ]; then
@@ -105,4 +108,4 @@ for REC_NAME in "$REC_NAME1" "$REC_NAME2"; do
   fi
 done
 
-re_log "✅ Both RECs Running (set up in parallel). Manifests in ${YAML_DIR#"$REPO_ROOT"/}/"
+re_log "✅ ${#PAIRS[@]} REC(s) Running (set up in parallel). Manifests in ${YAML_DIR#"$REPO_ROOT"/}/"

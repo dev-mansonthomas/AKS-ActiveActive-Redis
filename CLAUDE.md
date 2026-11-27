@@ -115,6 +115,7 @@ cp config.example.sh config.sh          # edit: CLOUD_PROVIDER, GCP_PROJECT_ID, 
 
 ./gcp-deploy.sh --plan-only      # preflight + tofu plan. Changes NOTHING. Do this first.
 ./gcp-deploy.sh                  # ONE COMMAND UP
+./gcp-deploy.sh --single [1|2]   # one cluster only (REC alone, no RERC/DB; gcp only, ADR 0015)
 ./gcp-deploy.sh --destroy        # ONE COMMAND DOWN
 
 ./aws-deploy.sh   [--plan-only|--destroy]
@@ -213,7 +214,7 @@ cd .. && ./scripts/chaos.sh --check-only        # health gate of BOTH clusters, 
 | Path | Responsibility |
 |---|---|
 | `scripts/01..05-*.sh`, `02a-setup-cluster.sh` | The deployment pipeline (provider-agnostic; `02a` installs one cluster, two run in parallel from `02`). |
-| `scripts/create-all.sh` | Runs 01→04, times each step, then 05. |
+| `scripts/create-all.sh` | Runs 01→04 (01→02 with `--single`), times each step, then 05. |
 | `scripts/delete-all-resources.sh` | Provider-aware teardown. |
 | `scripts/check-tags-{azure,aws,gcp}.sh` | Per-cloud tag/label compliance checks. Sourced by root `check-tags.sh`. |
 | `scripts/chaos.sh` | Chaos harness, provider-dispatched (GCP, Azure; AWS unsupported). Health gate on both clusters (cloud login first), scenarios `pod`/`node`/`region`/`region-recover`, `--no-prompt`, outage verified by observation, audit trail `debug/chaos-<ts>.log` + `.events.jsonl`, notifies the console. Spec: `docs/specs/chaos-webui.md`. |
@@ -231,7 +232,7 @@ cd .. && ./scripts/chaos.sh --check-only        # health gate of BOTH clusters, 
 | `redis-enterprise-testing/continuous_load/` | Dockerised load generator deployed into K8s. |
 | `gcp-setup.sh` (root) | One-off IAM/API setup of a GCP project, run by an IAM admin (never the deploy identity). `--dry-run` first. See `docs/gcp-iam.md`. |
 | `{gcp,aws,azure}-deploy.sh` (root) | **Host-side entry points — the supported way to run this.** Preflight → confirm → deploy/destroy. `--destroy`, `--plan-only`. Shared body in `common/deploy-lib.sh`. |
-| `common/lib.sh` | Shared library: `REPO_ROOT`, `re_load_config`, logging into `debug/`, `re_export_tf_vars`, `re_ns_ensure`, `re_dns_upsert`, `re_ingress_address`. **Source this first in any new script.** |
+| `common/lib.sh` | Shared library (cluster selection: `re_selected_indexes`, `re_clusters_in_state`, `re_selection_guard` — `RE_CLUSTERS`, ADR 0015): `REPO_ROOT`, `re_load_config`, logging into `debug/`, `re_export_tf_vars`, `re_ns_ensure`, `re_dns_upsert`, `re_ingress_address`. **Source this first in any new script.** |
 | `scripts/verify-config.sh` | Proves `config.sh` satisfies every Terraform variable, credential-free. |
 | `scripts/logs.sh`, `scripts/get-logs.sh` | Browse deployment logs / collect runtime diagnostics into `debug/`. |
 | `scripts/k9s-cluster.sh` | Open k9s on cluster 1 or 2 with the right gcloud identity pinned. |

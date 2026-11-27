@@ -21,6 +21,7 @@ These were written retrospectively: the *decisions* are evidenced in the code, b
 | [0012](0012-chaos-console-is-a-display.md) | Chaos console = read-only display driven by the script | Accepted 2026-11-26 |
 | [0013](0013-observe-the-outage-do-not-assume-it.md) | Observe the injected failure; hard vs advisory checks; audit trail | Accepted 2026-11-27 |
 | [0014](0014-credential-free-test-strategy.md) | Credential-free tests + host-side validation | Accepted 2026-11-27 |
+| [0015](0015-single-cluster-selection.md) | Single-cluster deployments: `--single` flag, state is the truth | Accepted 2026-11-27 (GCP) |
 
 ## Decisions that were never made (and should be)
 

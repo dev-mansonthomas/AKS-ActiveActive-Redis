@@ -128,4 +128,19 @@ wait_until "[ \"\$(kubectl --context=$CLUSTER get rec $REC_NAME -n $NS -o jsonpa
   60 10 "$CLUSTER: REC $REC_NAME reaching Running" \
   || re_die "$CLUSTER: REC did not reach Running — run ./scripts/get-logs.sh"
 
+# --- Cluster Manager session timeout -------------------------------------
+# Raise it so a demo does not log you out. `rladmin cluster config
+# cm_session_timeout_minutes` runs INSIDE the REC pod (the same way scripts/rladmin.sh
+# does): no credentials, nothing on the wire, no TLS verification to disable.
+# (It used to live in step 03, which a single-cluster deployment skips.)
+UI_SESSION_TIMEOUT_MINUTES="${RE_UI_SESSION_TIMEOUT_MINUTES:-1440}"
+if out=$(kubectl --context="$CLUSTER" -n "$NS" exec "$REC_NAME-0" -c redis-enterprise-node -- \
+     rladmin cluster config cm_session_timeout_minutes "$UI_SESSION_TIMEOUT_MINUTES" 2>&1); then
+  re_log "✅ $REC_NAME: Cluster Manager session timeout set to ${UI_SESSION_TIMEOUT_MINUTES} min"
+else
+  re_warn "$CLUSTER: could not set the session timeout on $REC_NAME-0 (non-fatal)"
+  re_warn "   cause: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-200)"
+  re_warn "   the Cluster Manager will log you out after its default 15 min"
+fi
+
 re_log "✅ $CLUSTER ($REC_NAME) ready"

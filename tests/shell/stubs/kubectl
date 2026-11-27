@@ -8,7 +8,10 @@ for ((i = 0; i < ${#args[@]}; i++)); do
 done
 rec=rec-a; [ "$ctx" = cl-b ] && rec=rec-b
 a="$*"
+# STUB_UNREACHABLE=<context>: that cluster does not answer (kubectl version fails)
+case "$a" in *" version"*) [ -z "${STUB_UNREACHABLE:-}" ] || [ "$ctx" != "$STUB_UNREACHABLE" ] || exit 1 ;; esac
 case "$a" in
+  *"config get-contexts"*) { echo cl-a; echo cl-b; } | { [ -z "${STUB_ONLY_CONTEXT:-}" ] && cat || grep -x -- "$STUB_ONLY_CONTEXT"; } ;;
   # step 04 / lib: REST calls made INSIDE a REC pod through `exec -i ... curl` (stdin carries the credentials)
   *"exec -i"*"fields=uid,name"*)
     cat >/dev/null; n=$(( $(cat "$D/bdb_calls" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$D/bdb_calls"
@@ -24,6 +27,7 @@ case "$a" in
   *"get rerc"*) printf 'rec-a Active Valid true\nrec-b Active Valid false\n' ;;
   *"get reaadb"*) printf '%s' "${STUB_REAADB:-active/up}" ;;
   *"get svc"*) printf '12000' ;;
+  *"get secret"*"data.username"*) printf 'ZGVtbw==' ;;   # base64 "demo": the REC admin login (step 05)
   *"get secret"*) : ;;
   *"rladmin status nodes"*) printf '*node:1 master 1 OK\nnode:2 slave 2 OK\nnode:3 slave 3 OK\n' ;;
   *"rladmin status databases"*)

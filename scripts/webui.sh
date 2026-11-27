@@ -26,9 +26,10 @@ fi
 # shellcheck source=../common/lib.sh
 . "$_LIB" || { echo "FATAL: failed to load $_LIB" >&2; exit 1; }
 
+EXPLICIT=0
 case "${1:-both}" in
   both) TARGETS="1 2" ;;
-  1|2)  TARGETS="$1" ;;
+  1|2)  TARGETS="$1"; EXPLICIT=1 ;;
   -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
   *)    echo "usage: $0 [1|2]   (no argument = both clusters)" >&2; exit 2 ;;
 esac
@@ -55,6 +56,11 @@ for IDX in $TARGETS; do
     CTX="$CLUSTER2"; REC="$REC_NAME2"; LOCAL_PORT="${RE_UI_LOCAL_PORT2:-8444}"
   fi
 
+  if [ "$EXPLICIT" -eq 0 ] && ! kubectl config get-contexts -o name 2>/dev/null | grep -qx "$CTX"; then
+    # no argument = every cluster that exists: a single-cluster deployment has only one
+    echo "ℹ️  cluster $IDX ('$CTX') has no kubeconfig context: skipped (not deployed?)"
+    continue
+  fi
   if ! kubectl config get-contexts -o name 2>/dev/null | grep -qx "$CTX"; then
     echo "❌ context '$CTX' is not in your kubeconfig — run: bash providers/$CLOUD_PROVIDER/get-credentials.sh" >&2
     exit 1
@@ -83,4 +89,5 @@ for IDX in $TARGETS; do
 done
 
 echo "Tunnels open — Ctrl-C to close them all."
+[ -n "$PIDS" ] || { echo "❌ no cluster to open: none of the contexts exists (run providers/$CLOUD_PROVIDER/get-credentials.sh)" >&2; exit 1; }
 wait

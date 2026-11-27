@@ -7,8 +7,10 @@ echo "▶ launcher"
 START="$ROOT/chaos-webui-start.sh"; STOP="$ROOT/chaos-webui-stop.sh"
 [ -x "$START" ] && ok "start script is executable" || bad "start script missing or not executable"
 [ -x "$STOP" ] && ok "stop script is executable" || bad "stop script missing or not executable"
-[ "$(stat -c %a "$START" 2>/dev/null || stat -f %Lp "$START")" = 700 ] && ok "start is chmod 700" || bad "start is not chmod 700"
-[ "$(stat -c %a "$STOP" 2>/dev/null || stat -f %Lp "$STOP")" = 700 ] && ok "stop is chmod 700" || bad "stop is not chmod 700"
+# git only stores the executable bit, so a fresh checkout gives 755: what matters is owner-executable and not writable by others
+perm_ok() { local m; m=$(stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"); [ -x "$1" ] && [ "$((8#$m & 8#022))" -eq 0 ]; }
+perm_ok "$START" && ok "start is executable and not group/world-writable" || bad "start is not executable / writable by others"
+perm_ok "$STOP" && ok "stop is executable and not group/world-writable" || bad "stop is not executable / writable by others"
 [ -e "$ROOT/scripts/launch-flask-console.sh" ] && bad "scripts/launch-flask-console.sh still exists" || ok "old duplicate removed"
 [ -e "$ROOT/launch-flask-console.sh" ] && bad "launch-flask-console.sh still exists" || ok "old launcher renamed"
 

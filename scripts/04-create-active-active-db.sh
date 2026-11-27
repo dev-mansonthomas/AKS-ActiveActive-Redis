@@ -11,6 +11,9 @@ fi
 
 re_load_config
 re_log_init "04-create-active-active-db"
+if re_is_single; then
+  re_die "step 04 creates an Active-Active database across TWO clusters: not applicable to a single-cluster deployment"
+fi
 re_yaml_dir_init
 
 # --- Database password ------------------------------------------------------
