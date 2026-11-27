@@ -21,6 +21,9 @@ debug/*
 
 #project specific
 
+# Personal deployment values (project, account, DNS zone, owner): copy config.example.sh to config.sh
+config.sh
+
 #Générated yaml
 yaml/*
 

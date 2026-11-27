@@ -327,11 +327,7 @@ replaces. See `docs/TODO.md` for the consolidation plan.
    DNS delete). **Still dead code:** all three `providers/*/chaos-provider.sh` (**A6** —
    `chaos.sh` now dispatches GCP/Azure itself).
 6. **A few scripts remain CWD-bound.** Anchored (run from anywhere): the whole `01`–`05` pipeline, `create-all.sh`, `delete-all-resources.sh`, `chaos.sh`, `providers/*/get-credentials.sh`, `scripts/{logs,get-logs,verify-config}.sh`. **Still CWD-bound:** root `check-tags.sh` (expects the repo root) and `redis-enterprise-testing/*`.
-7. **`config.sh` is committed** and holds personal values (`ThomasManson-temp-AKS`,
-   `demo.paquerette.com`, `thomas_manson`). No secrets, but it should be gitignored in favour
-   of `config.example.sh` — which is already **ahead** of it (`GCP_CLUSTER_RESOURCE_GROUP`,
-   `NODE_COUNT`, `DNS_RESOURCE_GROUP`, `CLUSTER_RESOURCE_GROUP` are missing from `config.sh`).
-   Also `DNS_RESOURCE_GROUP` is only set in the `azure` branch of the `case`.
+7. **`config.sh` is gitignored** (since 2026-11-27, TODO B6): it holds personal values (project, account, DNS zone, owner). Only `config.example.sh` is tracked and documents every variable; `./scripts/verify-config.sh all` checks that `config.sh` satisfies Terraform. Old versions of `config.sh` stay in the git history (domain names, `owner`, no credential).
 8. ~~**`flask/app.py` runs `app.run(debug=True)`**~~ ✅ **FIXED.** The console binds `127.0.0.1`,
    `debug=False`, and accepts chaos events from localhost only. Still never expose it.
 8b. **`sed -i` and some editors drop the executable bit on this mount** (seen 2026-11-26:

@@ -43,7 +43,7 @@ Tools on your machine (the **host**, not a VM — they need your cloud credentia
 ## 1.2 Configure: one file, `config.sh`
 
 ```bash
-cp config.example.sh config.sh     # your personal values; config.sh is still tracked by git today (TODO B6): never commit yours
+cp config.example.sh config.sh     # your personal values; config.sh is gitignored, only config.example.sh is tracked
 $EDITOR config.sh                  # set CLOUD_PROVIDER, the block of your cloud, owner, DNS zone
 ./scripts/verify-config.sh all     # proves config.sh satisfies every Terraform variable (no cloud needed)
 ```
